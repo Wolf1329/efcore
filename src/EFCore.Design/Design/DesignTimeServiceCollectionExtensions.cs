@@ -2,13 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Microsoft.EntityFrameworkCore.Design.Internal;
-using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.EntityFrameworkCore.Migrations.Design;
 using Microsoft.EntityFrameworkCore.Migrations.Internal;
-using Microsoft.EntityFrameworkCore.Scaffolding;
+using Microsoft.EntityFrameworkCore.Query.Internal;
 using Microsoft.EntityFrameworkCore.Scaffolding.Internal;
-using Microsoft.EntityFrameworkCore.TextTemplating;
-using Microsoft.EntityFrameworkCore.TextTemplating.Internal;
 
 namespace Microsoft.EntityFrameworkCore.Design;
 
@@ -45,8 +41,6 @@ public static class DesignTimeServiceCollectionExtensions
                     .TryAddSingleton<CSharpMigrationsGeneratorDependencies, CSharpMigrationsGeneratorDependencies>()
                     .TryAddSingleton<CSharpSnapshotGeneratorDependencies, CSharpSnapshotGeneratorDependencies>()
                     .TryAddSingleton<ICandidateNamingService, CandidateNamingService>()
-                    .TryAddSingleton<ICSharpDbContextGenerator, CSharpDbContextGenerator>()
-                    .TryAddSingleton<ICSharpEntityTypeGenerator, CSharpEntityTypeGenerator>()
                     .TryAddSingleton<ICSharpHelper, CSharpHelper>()
                     .TryAddSingleton<ICSharpMigrationOperationGenerator, CSharpMigrationOperationGenerator>()
                     .TryAddSingleton<ICSharpSnapshotGenerator, CSharpSnapshotGenerator>()
@@ -54,13 +48,14 @@ public static class DesignTimeServiceCollectionExtensions
                     .TryAddSingleton(reporter)
                     .TryAddSingleton<IMigrationsCodeGenerator, CSharpMigrationsGenerator>()
                     .TryAddSingleton<IMigrationsCodeGeneratorSelector, MigrationsCodeGeneratorSelector>()
-                    .TryAddSingleton<ITextTemplating, TextTemplatingService>()
                     .TryAddSingletonEnumerable<IModelCodeGenerator, TextTemplatingModelGenerator>()
                     .TryAddSingletonEnumerable<IModelCodeGenerator, CSharpModelGenerator>()
                     .TryAddSingleton<IModelCodeGeneratorSelector, ModelCodeGeneratorSelector>()
                     .TryAddSingleton<ICompiledModelCodeGenerator, CSharpRuntimeModelCodeGenerator>()
                     .TryAddSingleton<ICompiledModelCodeGeneratorSelector, CompiledModelCodeGeneratorSelector>()
                     .TryAddSingleton<ICompiledModelScaffolder, CompiledModelScaffolder>()
+                    .TryAddSingleton<IPrecompiledQueryCodeGenerator, PrecompiledQueryCodeGenerator>()
+                    .TryAddSingleton<IPrecompiledQueryCodeGeneratorSelector, PrecompiledQueryCodeGeneratorSelector>()
                     .TryAddSingleton<IDesignTimeConnectionStringResolver>(
                         new DesignTimeConnectionStringResolver(applicationServiceProviderAccessor))
                     .TryAddSingleton<IPluralizer, HumanizerPluralizer>()

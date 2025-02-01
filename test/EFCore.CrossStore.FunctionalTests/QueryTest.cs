@@ -10,7 +10,7 @@ namespace Microsoft.EntityFrameworkCore;
 
 public class QueryTest
 {
-    public static IEnumerable<object[]> IsAsyncData = new[] { new object[] { false }, new object[] { true } };
+    public static IEnumerable<object[]> IsAsyncData = new object[][] { [false], [true] };
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -49,7 +49,21 @@ public class QueryTest
     public async Task FromSqlRaw_throws_for_InMemory(bool async)
     {
         using var context = new InMemoryQueryContext();
-        var query = context.Blogs.FromSqlRaw("Select 1");
+        var query = RelationalQueryableExtensions.FromSqlRaw(context.Blogs, "Select 1");
+
+        var message = async
+            ? (await Assert.ThrowsAsync<InvalidOperationException>(() => query.ToListAsync())).Message
+            : Assert.Throws<InvalidOperationException>(() => query.ToList()).Message;
+
+        Assert.Equal(CoreStrings.QueryUnhandledQueryRootExpression(nameof(FromSqlQueryRootExpression)), message);
+    }
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public async Task Cosmos_FromSqlRaw_throws_for_InMemory(bool async)
+    {
+        using var context = new InMemoryQueryContext();
+        var query = CosmosQueryableExtensions.FromSqlRaw(context.Blogs, "Select 1");
 
         var message = async
             ? (await Assert.ThrowsAsync<InvalidOperationException>(() => query.ToListAsync())).Message
@@ -64,6 +78,20 @@ public class QueryTest
     {
         using var context = new InMemoryQueryContext();
         var query = context.Blogs.FromSqlInterpolated($"Select 1");
+
+        var message = async
+            ? (await Assert.ThrowsAsync<InvalidOperationException>(() => query.ToListAsync())).Message
+            : Assert.Throws<InvalidOperationException>(() => query.ToList()).Message;
+
+        Assert.Equal(CoreStrings.QueryUnhandledQueryRootExpression(nameof(FromSqlQueryRootExpression)), message);
+    }
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public async Task FromSql_throws_for_InMemory(bool async)
+    {
+        using var context = new InMemoryQueryContext();
+        var query = RelationalQueryableExtensions.FromSql(context.Blogs, $"Select 1");
 
         var message = async
             ? (await Assert.ThrowsAsync<InvalidOperationException>(() => query.ToListAsync())).Message
@@ -226,6 +254,7 @@ public class QueryTest
 
     private abstract class QueryContextBase : DbContext
     {
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<Blog> Blogs { get; set; }
         public DbSet<Post> Posts { get; set; }
 

@@ -1,9 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Microsoft.EntityFrameworkCore.SqlServer.Internal;
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore.Metadata;
 
 public class SqlServerMetadataExtensionsTest
@@ -99,23 +98,23 @@ public class SqlServerMetadataExtensionsTest
             .Property(e => e.Name)
             .Metadata;
 
-        Assert.Equal("Name", property.GetColumnBaseName());
+        Assert.Equal("Name", property.GetColumnName());
         Assert.Null(((IConventionProperty)property).GetColumnNameConfigurationSource());
 
         ((IConventionProperty)property).SetColumnName("Eman", fromDataAnnotation: true);
 
-        Assert.Equal("Eman", property.GetColumnBaseName());
+        Assert.Equal("Eman", property.GetColumnName());
         Assert.Equal(ConfigurationSource.DataAnnotation, ((IConventionProperty)property).GetColumnNameConfigurationSource());
 
         property.SetColumnName("MyNameIs");
 
         Assert.Equal("Name", property.Name);
-        Assert.Equal("MyNameIs", property.GetColumnBaseName());
+        Assert.Equal("MyNameIs", property.GetColumnName());
         Assert.Equal(ConfigurationSource.Explicit, ((IConventionProperty)property).GetColumnNameConfigurationSource());
 
         property.SetColumnName(null);
 
-        Assert.Equal("Name", property.GetColumnBaseName());
+        Assert.Equal("Name", property.GetColumnName());
         Assert.Null(((IConventionProperty)property).GetColumnNameConfigurationSource());
     }
 
@@ -279,38 +278,6 @@ public class SqlServerMetadataExtensionsTest
         property.SetValueGenerationStrategy(null);
 
         Assert.Equal(SqlServerValueGenerationStrategy.IdentityColumn, property.GetValueGenerationStrategy());
-    }
-
-    [ConditionalFact]
-    public void Throws_setting_sequence_generation_for_invalid_type()
-    {
-        var modelBuilder = GetModelBuilder();
-
-        var property = modelBuilder
-            .Entity<Customer>()
-            .Property(e => e.Name)
-            .Metadata;
-
-        Assert.Equal(
-            SqlServerStrings.SequenceBadType("Name", nameof(Customer), "string"),
-            Assert.Throws<ArgumentException>(
-                () => property.SetValueGenerationStrategy(SqlServerValueGenerationStrategy.SequenceHiLo)).Message);
-    }
-
-    [ConditionalFact]
-    public void Throws_setting_identity_generation_for_invalid_type()
-    {
-        var modelBuilder = GetModelBuilder();
-
-        var property = modelBuilder
-            .Entity<Customer>()
-            .Property(e => e.Name)
-            .Metadata;
-
-        Assert.Equal(
-            SqlServerStrings.IdentityBadType("Name", nameof(Customer), "string"),
-            Assert.Throws<ArgumentException>(
-                () => property.SetValueGenerationStrategy(SqlServerValueGenerationStrategy.IdentityColumn)).Message);
     }
 
     [ConditionalFact]

@@ -49,7 +49,10 @@ public static class UpdateEntryExtensions
     /// <returns>The value for the property.</returns>
     public static object? GetOriginalProviderValue(this IUpdateEntry updateEntry, IProperty property)
     {
-        var value = updateEntry.GetOriginalValue(property);
+        var value = updateEntry.CanHaveOriginalValue(property)
+            ? updateEntry.GetOriginalValue(property)
+            : updateEntry.GetCurrentValue(property);
+
         var typeMapping = property.GetTypeMapping();
         value = value?.GetType().IsInteger() == true && typeMapping.ClrType.UnwrapNullableType().IsEnum
             ? Enum.ToObject(typeMapping.ClrType.UnwrapNullableType(), value)
@@ -88,182 +91,209 @@ public static class UpdateEntryExtensions
         var builder = new StringBuilder();
         var indentString = new string(' ', indent);
 
-        var entry = (InternalEntityEntry)updateEntry;
-
-        var keyString = entry.BuildCurrentValuesString(entry.EntityType.FindPrimaryKey()!.Properties);
-
-        builder
-            .Append(entry.EntityType.DisplayName())
-            .Append(' ')
-            .Append(entry.SharedIdentityEntry != null ? "(Shared) " : "")
-            .Append(keyString)
-            .Append(' ')
-            .Append(entry.EntityState.ToString());
-
-        if ((options & ChangeTrackerDebugStringOptions.IncludeProperties) != 0)
+        try
         {
-            foreach (var property in entry.EntityType.GetProperties())
+            var entry = (InternalEntityEntry)updateEntry;
+
+            var keyString = entry.BuildCurrentValuesString(entry.EntityType.FindPrimaryKey()!.Properties);
+
+            builder
+                .Append(entry.EntityType.DisplayName())
+                .Append(' ')
+                .Append(entry.SharedIdentityEntry != null ? "(Shared) " : "")
+                .Append(keyString)
+                .Append(' ')
+                .Append(entry.EntityState.ToString());
+
+            if ((options & ChangeTrackerDebugStringOptions.IncludeProperties) != 0)
             {
-                builder.AppendLine().Append(indentString);
+                DumpProperties(entry.EntityType, indent + 2);
 
-                var currentValue = entry.GetCurrentValue(property);
-                builder
-                    .Append("  ")
-                    .Append(property.Name)
-                    .Append(": ");
-
-                AppendValue(currentValue);
-
-                if (property.IsPrimaryKey())
+                void DumpProperties(ITypeBase structuralType, int tempIndent)
                 {
-                    builder.Append(" PK");
-                }
-                else if (property.IsKey())
-                {
-                    builder.Append(" AK");
-                }
-
-                if (property.IsForeignKey())
-                {
-                    builder.Append(" FK");
-                }
-
-                if (entry.IsModified(property))
-                {
-                    builder.Append(" Modified");
-                }
-
-                if (entry.HasTemporaryValue(property))
-                {
-                    builder.Append(" Temporary");
-                }
-
-                if (entry.IsUnknown(property))
-                {
-                    builder.Append(" Unknown");
-                }
-
-                if (entry.HasOriginalValuesSnapshot
-                    && property.GetOriginalValueIndex() != -1)
-                {
-                    var originalValue = entry.GetOriginalValue(property);
-                    if (!Equals(originalValue, currentValue))
+                    var tempIndentString = new string(' ', tempIndent);
+                    foreach (var property in structuralType.GetProperties())
                     {
-                        builder.Append(" Originally ");
-                        AppendValue(originalValue);
-                    }
-                }
-            }
-        }
-        else
-        {
-            foreach (var alternateKey in entry.EntityType.GetKeys().Where(k => !k.IsPrimaryKey()))
-            {
-                builder
-                    .Append(" AK ")
-                    .Append(entry.BuildCurrentValuesString(alternateKey.Properties));
-            }
+                        builder.AppendLine().Append(tempIndentString);
 
-            foreach (var foreignKey in entry.EntityType.GetForeignKeys())
-            {
-                builder
-                    .Append(" FK ")
-                    .Append(entry.BuildCurrentValuesString(foreignKey.Properties));
-            }
-        }
+                        var currentValue = entry.GetCurrentValue(property);
+                        builder
+                            .Append("  ")
+                            .Append(property.Name)
+                            .Append(": ");
 
-        if ((options & ChangeTrackerDebugStringOptions.IncludeNavigations) != 0)
-        {
-            foreach (var navigation in entry.EntityType.GetNavigations()
-                         .Concat<INavigationBase>(entry.EntityType.GetSkipNavigations()))
-            {
-                builder.AppendLine().Append(indentString);
+                        AppendValue(currentValue);
 
-                var currentValue = entry.GetCurrentValue(navigation);
-                var targetType = navigation.TargetEntityType;
-
-                builder
-                    .Append("  ")
-                    .Append(navigation.Name)
-                    .Append(": ");
-
-                if (currentValue == null)
-                {
-                    builder.Append("<null>");
-                }
-                else if (navigation.IsCollection)
-                {
-                    builder.Append('[');
-
-                    const int maxRelatedToShow = 32;
-                    var relatedEntities = ((IEnumerable)currentValue).Cast<object>().Take(maxRelatedToShow + 1).ToList();
-
-                    for (var i = 0; i < relatedEntities.Count; i++)
-                    {
-                        if (i != 0)
+                        if (property.IsPrimaryKey())
                         {
-                            builder.Append(", ");
+                            builder.Append(" PK");
+                        }
+                        else if (property.IsKey())
+                        {
+                            builder.Append(" AK");
                         }
 
-                        if (i < 32)
+                        if (property.IsForeignKey())
                         {
-                            AppendRelatedKey(targetType, relatedEntities[i]);
+                            builder.Append(" FK");
                         }
-                        else
+
+                        if (entry.IsModified(property))
                         {
-                            builder.Append("...");
+                            builder.Append(" Modified");
+                        }
+
+                        if (entry.HasTemporaryValue(property))
+                        {
+                            builder.Append(" Temporary");
+                        }
+
+                        if (entry.IsUnknown(property))
+                        {
+                            builder.Append(" Unknown");
+                        }
+
+                        if (entry.HasOriginalValuesSnapshot
+                            && property.GetOriginalValueIndex() != -1)
+                        {
+                            var originalValue = entry.GetOriginalValue(property);
+                            if (!Equals(originalValue, currentValue))
+                            {
+                                builder.Append(" Originally ");
+                                AppendValue(originalValue);
+                            }
                         }
                     }
 
-                    builder.Append(']');
-                }
-                else
-                {
-                    AppendRelatedKey(targetType, currentValue);
-                }
-            }
-        }
+                    foreach (var complexProperty in structuralType.GetComplexProperties())
+                    {
+                        builder.AppendLine().Append(tempIndentString);
 
-        return builder.ToString();
+                        builder
+                            .Append("  ")
+                            .Append(complexProperty.Name)
+                            .Append(" (Complex: ")
+                            .Append(complexProperty.ClrType.ShortDisplayName())
+                            .Append(")");
 
-        void AppendValue(object? value)
-        {
-            if (value == null)
-            {
-                builder.Append("<null>");
-            }
-            else if (value.GetType().IsNumeric())
-            {
-                builder.Append(value);
-            }
-            else if (value is byte[] bytes)
-            {
-                builder.AppendBytes(bytes);
+                        DumpProperties(complexProperty.ComplexType, tempIndent + 2);
+                    }
+                }
             }
             else
             {
-                var stringValue = value.ToString();
-                if (stringValue?.Length > 63)
+                foreach (var alternateKey in entry.EntityType.GetKeys().Where(k => !k.IsPrimaryKey()))
                 {
-                    stringValue = string.Concat(stringValue.AsSpan(0, 60), "...");
+                    builder
+                        .Append(" AK ")
+                        .Append(entry.BuildCurrentValuesString(alternateKey.Properties));
                 }
 
-                builder
-                    .Append('\'')
-                    .Append(stringValue)
-                    .Append('\'');
+                foreach (var foreignKey in entry.EntityType.GetForeignKeys())
+                {
+                    builder
+                        .Append(" FK ")
+                        .Append(entry.BuildCurrentValuesString(foreignKey.Properties));
+                }
+            }
+
+            if ((options & ChangeTrackerDebugStringOptions.IncludeNavigations) != 0)
+            {
+                foreach (var navigation in entry.EntityType.GetNavigations()
+                             .Concat<INavigationBase>(entry.EntityType.GetSkipNavigations()))
+                {
+                    builder.AppendLine().Append(indentString);
+
+                    var currentValue = entry.GetCurrentValue(navigation);
+                    var targetType = navigation.TargetEntityType;
+
+                    builder
+                        .Append("  ")
+                        .Append(navigation.Name)
+                        .Append(": ");
+
+                    if (currentValue == null)
+                    {
+                        builder.Append("<null>");
+                    }
+                    else if (navigation.IsCollection)
+                    {
+                        builder.Append('[');
+
+                        const int maxRelatedToShow = 32;
+                        var relatedEntities = ((IEnumerable)currentValue).Cast<object>().Take(maxRelatedToShow + 1).ToList();
+
+                        for (var i = 0; i < relatedEntities.Count; i++)
+                        {
+                            if (i != 0)
+                            {
+                                builder.Append(", ");
+                            }
+
+                            if (i < 32)
+                            {
+                                AppendRelatedKey(targetType, relatedEntities[i]);
+                            }
+                            else
+                            {
+                                builder.Append("...");
+                            }
+                        }
+
+                        builder.Append(']');
+                    }
+                    else
+                    {
+                        AppendRelatedKey(targetType, currentValue);
+                    }
+                }
+            }
+
+            void AppendValue(object? value)
+            {
+                if (value == null)
+                {
+                    builder.Append("<null>");
+                }
+                else if (value.GetType().IsNumeric())
+                {
+                    builder.Append(value);
+                }
+                else if (value is byte[] bytes)
+                {
+                    builder.AppendBytes(bytes);
+                }
+                else
+                {
+                    var stringValue = value.ToString();
+                    if (stringValue?.Length > 63)
+                    {
+                        stringValue = string.Concat(stringValue.AsSpan(0, 60), "...");
+                    }
+
+                    builder
+                        .Append('\'')
+                        .Append(stringValue)
+                        .Append('\'');
+                }
+            }
+
+            void AppendRelatedKey(IEntityType targetType, object value)
+            {
+                var otherEntry = entry.StateManager.TryGetEntry(value, targetType, throwOnTypeMismatch: false);
+
+                builder.Append(
+                    otherEntry == null
+                        ? "<not found>"
+                        : otherEntry.BuildCurrentValuesString(targetType.FindPrimaryKey()!.Properties));
             }
         }
-
-        void AppendRelatedKey(IEntityType targetType, object value)
+        catch (Exception exception)
         {
-            var otherEntry = entry.StateManager.TryGetEntry(value, targetType, throwOnTypeMismatch: false);
-
-            builder.Append(
-                otherEntry == null
-                    ? "<not found>"
-                    : otherEntry.BuildCurrentValuesString(targetType.FindPrimaryKey()!.Properties));
+            builder.AppendLine().AppendLine(CoreStrings.DebugViewError(exception.Message));
         }
+
+        return builder.ToString();
     }
 
     /// <summary>

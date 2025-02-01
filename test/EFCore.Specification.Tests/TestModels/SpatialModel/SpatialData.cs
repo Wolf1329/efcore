@@ -5,22 +5,15 @@ using NetTopologySuite.Geometries;
 
 namespace Microsoft.EntityFrameworkCore.TestModels.SpatialModel;
 
-public class SpatialData : ISetSource
-{
-    private readonly IReadOnlyList<PointEntity> _pointEntities;
-    private readonly IReadOnlyList<GeoPointEntity> _geoPointEntities;
-    private readonly IReadOnlyList<LineStringEntity> _lineStringEntities;
-    private readonly IReadOnlyList<PolygonEntity> _polygonEntities;
-    private readonly IReadOnlyList<MultiLineStringEntity> _multiLineStringEntities;
+#nullable disable
 
-    public SpatialData(GeometryFactory factory)
-    {
-        _pointEntities = CreatePointEntities(factory);
-        _geoPointEntities = CreateGeoPointEntities();
-        _lineStringEntities = CreateLineStringEntities(factory);
-        _polygonEntities = CreatePolygonEntities(factory);
-        _multiLineStringEntities = CreateMultiLineStringEntities(factory);
-    }
+public class SpatialData(GeometryFactory factory) : ISetSource
+{
+    private readonly IReadOnlyList<PointEntity> _pointEntities = CreatePointEntities(factory);
+    private readonly IReadOnlyList<GeoPointEntity> _geoPointEntities = CreateGeoPointEntities();
+    private readonly IReadOnlyList<LineStringEntity> _lineStringEntities = CreateLineStringEntities(factory);
+    private readonly IReadOnlyList<PolygonEntity> _polygonEntities = CreatePolygonEntities(factory);
+    private readonly IReadOnlyList<MultiLineStringEntity> _multiLineStringEntities = CreateMultiLineStringEntities(factory);
 
     public virtual IQueryable<TEntity> Set<TEntity>()
         where TEntity : class
@@ -60,12 +53,27 @@ public class SpatialData : ISetSource
             new PointEntity
             {
                 Id = PointEntity.WellKnownId,
+                Group = "A",
                 Point = factory.CreatePoint(new Coordinate(0, 0)),
                 PointZ = factory.CreatePoint(new CoordinateZ(0, 0, 0)),
                 PointM = factory.CreatePoint(new CoordinateM(0, 0, 0)),
                 PointZM = factory.CreatePoint(new CoordinateZM(0, 0, 0, 0))
             },
-            new PointEntity { Id = Guid.Parse("67A54C9B-4C3B-4B27-8B4E-C0335E50E551"), Point = null }
+            new PointEntity
+            {
+                Id = Guid.Parse("2F39AADE-4D8D-42D2-88CE-775C84AB83B2"),
+                Group = "A",
+                Point = factory.CreatePoint(new Coordinate(1, 1)),
+                PointZ = factory.CreatePoint(new CoordinateZ(1, 1, 1)),
+                PointM = factory.CreatePoint(new CoordinateM(1, 1, 1)),
+                PointZM = factory.CreatePoint(new CoordinateZM(1, 1, 1, 1))
+            },
+            new PointEntity
+            {
+                Id = Guid.Parse("67A54C9B-4C3B-4B27-8B4E-C0335E50E551"),
+                Group = "B",
+                Point = null
+            }
         };
 
         foreach (var entity in entities)
@@ -92,12 +100,7 @@ public class SpatialData : ISetSource
     public static IReadOnlyList<LineStringEntity> CreateLineStringEntities(GeometryFactory factory)
         => new[]
         {
-            new LineStringEntity
-            {
-                Id = 1,
-                LineString = factory.CreateLineString(
-                    new[] { new Coordinate(0, 0), new Coordinate(1, 0) })
-            },
+            new LineStringEntity { Id = 1, LineString = factory.CreateLineString([new Coordinate(0, 0), new Coordinate(1, 0)]) },
             new LineStringEntity { Id = 2, LineString = null }
         };
 
@@ -108,7 +111,7 @@ public class SpatialData : ISetSource
             {
                 Id = Guid.Parse("2F39AADE-4D8D-42D2-88CE-775C84AB83B1"),
                 Polygon = factory.CreatePolygon(
-                    new[] { new Coordinate(0, 0), new Coordinate(1, 0), new Coordinate(0, 1), new Coordinate(0, 0) })
+                    [new Coordinate(0, 0), new Coordinate(1, 0), new Coordinate(0, 1), new Coordinate(0, 0)])
             },
             new PolygonEntity { Id = Guid.Parse("F1B00CB9-862B-417B-955A-F1F7688B2AB5"), Polygon = null }
         };
@@ -120,13 +123,10 @@ public class SpatialData : ISetSource
             {
                 Id = 1,
                 MultiLineString = factory.CreateMultiLineString(
-                    new[]
-                    {
-                        factory.CreateLineString(
-                            new[] { new Coordinate(0, 0), new Coordinate(0, 1) }),
-                        factory.CreateLineString(
-                            new[] { new Coordinate(1, 0), new Coordinate(1, 1) })
-                    })
+                [
+                    factory.CreateLineString([new Coordinate(0, 0), new Coordinate(0, 1)]),
+                    factory.CreateLineString([new Coordinate(1, 0), new Coordinate(1, 1)])
+                ])
             },
             new MultiLineStringEntity { Id = 2, MultiLineString = null }
         };

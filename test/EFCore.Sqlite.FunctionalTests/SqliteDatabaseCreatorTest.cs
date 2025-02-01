@@ -1,10 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
+using Microsoft.Data.Sqlite;
+
 namespace Microsoft.EntityFrameworkCore;
+
+#nullable disable
 
 public class SqliteDatabaseCreatorTest
 {
@@ -33,7 +36,7 @@ public class SqliteDatabaseCreatorTest
     [InlineData(true)]
     public async Task HasTables_returns_false_when_database_is_empty(bool async)
     {
-        using var testStore = SqliteTestStore.GetOrCreateInitialized("Empty");
+        await using var testStore = await SqliteTestStore.GetOrCreateInitializedAsync("Empty");
         var context = CreateContext(testStore.ConnectionString);
 
         var creator = context.GetService<IRelationalDatabaseCreator>();
@@ -45,7 +48,7 @@ public class SqliteDatabaseCreatorTest
     [InlineData(true)]
     public async Task HasTables_returns_true_when_database_is_not_empty(bool async)
     {
-        using var testStore = SqliteTestStore.GetOrCreateInitialized($"HasATable{(async ? 'A' : 'S')}");
+        await using var testStore = await SqliteTestStore.GetOrCreateInitializedAsync($"HasATable{(async ? 'A' : 'S')}");
         var context = CreateContext(testStore.ConnectionString);
         context.Database.ExecuteSqlRaw("CREATE TABLE Dummy (Foo INTEGER)");
 
@@ -60,7 +63,7 @@ public class SqliteDatabaseCreatorTest
     [InlineData(true, true)]
     public async Task Exists_returns_true_when_database_exists(bool async, bool useCanConnect)
     {
-        using var testStore = SqliteTestStore.GetOrCreateInitialized("Empty");
+        await using var testStore = await SqliteTestStore.GetOrCreateInitializedAsync("Empty");
         var context = CreateContext(testStore.ConnectionString);
 
         if (useCanConnect)
@@ -79,7 +82,7 @@ public class SqliteDatabaseCreatorTest
     [InlineData(true)]
     public async Task Create_sets_journal_mode_to_wal(bool async)
     {
-        using var testStore = SqliteTestStore.GetOrCreate("Create");
+        await using var testStore = SqliteTestStore.GetOrCreate("Create");
         using var context = CreateContext(testStore.ConnectionString);
         var creator = context.GetService<IRelationalDatabaseCreator>();
 
@@ -97,7 +100,7 @@ public class SqliteDatabaseCreatorTest
         Assert.Equal("wal", journalMode);
     }
 
-    [ConditionalTheory(Skip = "Issues #25797 and #26016")]
+    [ConditionalTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Delete_works_even_when_different_connection_exists_to_same_file(bool async)
@@ -133,17 +136,88 @@ public class SqliteDatabaseCreatorTest
         }
     }
 
-    private class BathtubContext : DbContext
+    private class BathtubContext(string connectionString) : DbContext
     {
-        private readonly string _connectionString;
-
-        public BathtubContext(string connectionString)
-        {
-            _connectionString = connectionString;
-        }
+        private readonly string _connectionString = connectionString;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
             => optionsBuilder.UseSqlite(_connectionString);
+    }
+
+    [ConditionalTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Delete_works_for_in_memory_database(bool async)
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+
+        using (var context = new ShowerContext(connection))
+        {
+            _ = async
+                ? await context.Database.EnsureCreatedAsync()
+                : context.Database.EnsureCreated();
+
+            context.Add(new Soap());
+            context.SaveChanges();
+        }
+
+        using (var context = new ShowerContext(connection))
+        {
+            Assert.NotNull(context.Soap.FirstOrDefault());
+
+            _ = async
+                ? await context.Database.EnsureDeletedAsync()
+                : context.Database.EnsureDeleted();
+        }
+
+        using (var context = new ShowerContext(connection))
+        {
+            _ = async
+                ? await context.Database.EnsureCreatedAsync()
+                : context.Database.EnsureCreated();
+
+            Assert.Null(context.Soap.FirstOrDefault());
+            context.Add(new Soap());
+            context.SaveChanges();
+        }
+
+        using (var context = new ShowerContext(connection))
+        {
+            Assert.NotNull(context.Soap.FirstOrDefault());
+        }
+
+        // using (var context = new BathtubContext("Command Timeout=60;DataSource=bathtub.db"))
+        // {
+        //     var creator = context.GetService<IRelationalDatabaseCreator>();
+        //
+        //     if (async)
+        //     {
+        //         await context.Database.EnsureDeletedAsync();
+        //         Assert.False(await creator.ExistsAsync());
+        //     }
+        //     else
+        //     {
+        //         context.Database.EnsureDeleted();
+        //         Assert.False(creator.Exists());
+        //     }
+        // }
+    }
+
+    private class Soap
+    {
+        public int Id { get; set; }
+    }
+
+    private class ShowerContext(DbConnection connection) : DbContext
+    {
+        private readonly DbConnection _connection = connection;
+
+        public DbSet<Soap> Soap
+            => Set<Soap>();
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder.UseSqlite(_connection);
     }
 
     [ConditionalTheory]

@@ -1,19 +1,16 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore;
 
-public class CommandConfigurationTest : IClassFixture<CommandConfigurationTest.CommandConfigurationTestFixture>
-{
-    public CommandConfigurationTest(CommandConfigurationTestFixture fixture)
-    {
-        Fixture = fixture;
-    }
+#nullable disable
 
-    protected CommandConfigurationTestFixture Fixture { get; }
+public class CommandConfigurationTest(CommandConfigurationTest.CommandConfigurationTestFixture fixture)
+    : IClassFixture<CommandConfigurationTest.CommandConfigurationTestFixture>
+{
+    protected CommandConfigurationTestFixture Fixture { get; } = fixture;
 
     [ConditionalFact]
     public void Constructed_select_query_CommandBuilder_throws_when_negative_CommandTimeout_is_used()
@@ -27,7 +24,8 @@ public class CommandConfigurationTest : IClassFixture<CommandConfigurationTest.C
 
     public class CommandConfigurationTestFixture : SharedStoreFixtureBase<PoolableDbContext>
     {
-        protected override string StoreName { get; } = "Empty";
+        protected override string StoreName
+            => "Empty";
 
         protected override ITestStoreFactory TestStoreFactory
             => SqliteTestStoreFactory.Instance;

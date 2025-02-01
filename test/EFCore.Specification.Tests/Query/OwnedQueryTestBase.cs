@@ -1,18 +1,50 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore.Query;
+
+#nullable disable
 
 public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
     where TFixture : OwnedQueryTestBase<TFixture>.OwnedQueryFixtureBase, new()
 {
     protected OwnedQueryTestBase(TFixture fixture)
         : base(fixture)
+        => fixture.ListLoggerFactory.Clear();
+
+    [ConditionalTheory] // Issue #26257
+    [MemberData(nameof(IsAsyncData))]
+    public virtual async Task Can_query_owner_with_different_owned_types_having_same_property_name_in_hierarchy(bool async)
     {
-        fixture.ListLoggerFactory.Clear();
+        using (var context = CreateContext())
+        {
+            await context.AddAsync(
+                new HeliumBalloon
+                {
+                    Id = Guid.NewGuid().ToString(), Gas = new Helium(),
+                });
+
+            await context.AddAsync(new HydrogenBalloon { Id = Guid.NewGuid().ToString(), Gas = new Hydrogen() });
+
+            _ = async ? await context.SaveChangesAsync() : context.SaveChanges();
+        }
+
+        using (var context = CreateContext())
+        {
+            var balloons = async
+                ? await context.Set<Balloon>().ToListAsync()
+                : context.Set<Balloon>().ToList();
+
+            Assert.NotEmpty(balloons);
+            var heliumBalloons = balloons.OfType<HeliumBalloon>().ToList();
+            var hydrogenBalloons = balloons.OfType<HydrogenBalloon>().ToList();
+            Assert.Equal(heliumBalloons.Count, hydrogenBalloons.Count);
+
+            Assert.All(heliumBalloons, b => Assert.IsType<Helium>(b.Gas));
+            Assert.All(hydrogenBalloons, b => Assert.IsType<Hydrogen>(b.Gas));
+        }
     }
 
     [ConditionalTheory]
@@ -23,7 +55,8 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
             ss => from a in ss.Set<LeafA>()
                   from b in ss.Set<LeafB>()
                   where a.LeafAAddress == b.LeafBAddress
-                  select a);
+                  select a,
+            assertEmpty: true);
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -33,7 +66,8 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
             ss => from a in ss.Set<LeafA>()
                   from b in ss.Set<LeafB>()
                   where a.LeafAAddress.Equals(b.LeafBAddress)
-                  select a);
+                  select a,
+            assertEmpty: true);
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -43,7 +77,8 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
             ss => from a in ss.Set<LeafA>()
                   from b in ss.Set<LeafB>()
                   where Equals(a.LeafAAddress, b.LeafBAddress)
-                  select a);
+                  select a,
+            assertEmpty: true);
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -71,8 +106,7 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
     public virtual Task Query_for_branch_type_loads_all_owned_navs_tracking(bool async)
         => AssertQuery(
             async,
-            ss => ss.Set<Branch>().AsTracking(),
-            entryCount: 16);
+            ss => ss.Set<Branch>().AsTracking());
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -92,6 +126,20 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
                 .Select(op => new { op }),
             assertOrder: true,
             elementAsserter: (e, a) => AssertEqual(e.op, a.op));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Project_owned_reference_navigation_which_owns_additional(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().OrderBy(o => o.Id).Select(p => p.PersonAddress));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Project_owned_reference_navigation_which_does_not_own_additional(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().OrderBy(o => o.Id).Select(p => p.PersonAddress.Country));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -139,6 +187,13 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
         => AssertQuery(
             async,
             ss => ss.Set<OwnedPerson>().SelectMany(p => p.Orders));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task SelectMany_with_result_selector(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().SelectMany(o => o.Orders, (p, o) => new { PersonId = p.Id, OrderId = o.Id }));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -364,8 +419,7 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
     public virtual Task Unmapped_property_projection_loads_owned_navigations(bool async)
         => AssertQuery(
             async,
-            ss => ss.Set<OwnedPerson>().Where(e => e.Id == 1).AsTracking().Select(e => new { e.ReadOnlyProperty }),
-            entryCount: 7);
+            ss => ss.Set<OwnedPerson>().Where(e => e.Id == 1).AsTracking().Select(e => new { e.ReadOnlyProperty }));
 
     // Issue#18140
     [ConditionalTheory]
@@ -560,7 +614,7 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
-    public virtual Task Can_OrderBy_owened_indexer_properties_converted(bool async)
+    public virtual Task Can_OrderBy_owned_indexer_properties_converted(bool async)
         => AssertQuery(
             async,
             ss => ss.Set<OwnedPerson>().OrderBy(c => (int)c.PersonAddress["ZipCode"]).ThenBy(c => c.Id).Select(c => (string)c["Name"]),
@@ -726,7 +780,7 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
     {
         using var context = CreateContext();
 
-        var ownedPerson = context.Set<OwnedPerson>().AsTracking().Single(e => e.Id == 1);
+        var ownedPerson = await context.Set<OwnedPerson>().AsTracking().SingleAsync(e => e.Id == 1);
         var collectionQuery = context.Entry(ownedPerson).Collection(e => e.Orders).Query().AsNoTracking();
 
         var actualOrders = async
@@ -791,17 +845,166 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Simple_query_entity_with_owned_collection(bool async)
-    {
-        return AssertQuery(
+        => AssertQuery(
             async,
             ss => ss.Set<Star>());
-    }
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Left_join_on_entity_with_owned_navigations(bool async)
+        => AssertQuery(
+            async,
+            ss => from c1 in ss.Set<Planet>()
+                  join c2 in ss.Set<OwnedPerson>() on c1.Id equals c2.Id into grouping
+                  from c2 in grouping.DefaultIfEmpty()
+                  select new { c1, c2.Id, c2, c2.Orders, c2.PersonAddress },
+            elementSorter: e => (e.c1.Id, e.c2.Id),
+            elementAsserter: (e, a) =>
+            {
+                AssertEqual(e.c1, a.c1);
+                AssertEqual(e.Id, a.Id);
+                AssertEqual(e.c2, a.c2);
+                AssertCollection(e.Orders, a.Orders, elementSorter: ee => ee.Id);
+                AssertEqual(e.PersonAddress, a.PersonAddress);
+            });
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Left_join_on_entity_with_owned_navigations_complex(bool async)
+        => AssertQuery(
+            async,
+            ss =>
+                from o in ss.Set<Planet>()
+                join sub in (
+                    from c1 in ss.Set<Planet>()
+                    join c2 in ss.Set<OwnedPerson>() on c1.Id equals c2.Id into grouping
+                    from c2 in grouping.DefaultIfEmpty()
+                    select new
+                    {
+                        c1,
+                        c2.Id,
+                        c2
+                    }).Distinct() on o.Id equals sub.Id into grouping2
+                from sub in grouping2.DefaultIfEmpty()
+                select new { o, sub },
+            elementSorter: e => (e.o.Id, e.sub.c1.Id, e.sub.Id),
+            elementAsserter: (e, a) =>
+            {
+                AssertEqual(e.o, a.o);
+                AssertEqual(e.sub.Id, a.sub.Id);
+                AssertEqual(e.sub.c1, a.sub.c1);
+                AssertEqual(e.sub.c2, a.sub.c2);
+            });
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task GroupBy_aggregate_on_owned_navigation_in_aggregate_selector(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>()
+                .GroupBy(e => e.Id)
+                .Select(e => new { e.Key, Sum = e.Sum(i => i.PersonAddress.Country.PlanetId) }),
+            elementSorter: e => e.Key,
+            elementAsserter: (e, a) =>
+            {
+                AssertEqual(e.Key, a.Key);
+                AssertEqual(e.Sum, a.Sum);
+            });
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Count_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Count == 2));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Any_without_predicate_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Any()));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Any_with_predicate_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Any(i => i.Id == -30)));
+
+    // TODO: proper owned entity containment, #34027
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Contains_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Contains(new Order { Id = -30 })),
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Any(o => o.Id == -30)));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task ElementAt_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.ElementAt(1).Id == -11),
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Count >= 2 && p.Orders.ElementAt(1).Id == -11));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task ElementAtOrDefault_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.ElementAtOrDefault(10).Id == -11),
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Count >= 11 && p.Orders.ElementAtOrDefault(1).Id == -11),
+            assertEmpty: true);
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task OrderBy_ElementAt_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.OrderBy(o => o.Id).ElementAt(1).Id == -10),
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Count >= 2 && p.Orders.OrderBy(o => o.Id).ElementAt(1).Id == -10));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Skip_Take_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Skip(1).Take(1).Count() == 1));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task FirstOrDefault_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => ((DateTime)p.Orders.FirstOrDefault(o => o.Id > -20)["OrderDate"]).Year == 2018),
+            ss => ss.Set<OwnedPerson>().Where(
+                p => Enumerable.FirstOrDefault(p.Orders, o => o.Id > -20) != null
+                    && ((DateTime)p.Orders.FirstOrDefault(o => o.Id > -20)["OrderDate"]).Year == 2018));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Distinct_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>().Where(p => p.Orders.Distinct().Count() == 2));
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Union_over_owned_collection(bool async)
+        => AssertQuery(
+            async,
+            ss => ss.Set<OwnedPerson>()
+                .Where(p => p.Orders.Where(o => o.Id == -10).Union(p.Orders.Where(o => o.Id == -11)).Count() == 2));
 
     protected virtual DbContext CreateContext()
         => Fixture.CreateContext();
 
     public abstract class OwnedQueryFixtureBase : SharedStoreFixtureBase<PoolableDbContext>, IQueryFixtureBase
     {
+        private OwnedQueryData _expectedData;
+
         private static void AssertAddress(OwnedAddress expectedAddress, OwnedAddress actualAddress)
         {
             Assert.Equal(expectedAddress["AddressLine"], actualAddress["AddressLine"]);
@@ -841,265 +1044,259 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
             => () => CreateContext();
 
         public virtual ISetSource GetExpectedData()
-            => new OwnedQueryData();
+            => _expectedData ??= new OwnedQueryData();
 
-        public IReadOnlyDictionary<Type, object> GetEntitySorters()
-            => new Dictionary<Type, Func<object, object>>
+        public IReadOnlyDictionary<Type, object> EntitySorters { get; } = new Dictionary<Type, Func<object, object>>
+        {
+            { typeof(OwnedPerson), e => ((OwnedPerson)e)?.Id },
+            { typeof(Branch), e => ((Branch)e)?.Id },
+            { typeof(LeafA), e => ((LeafA)e)?.Id },
+            { typeof(LeafB), e => ((LeafB)e)?.Id },
+            { typeof(Planet), e => ((Planet)e)?.Id },
+            { typeof(Star), e => ((Star)e)?.Id },
+            { typeof(Moon), e => ((Moon)e)?.Id },
+            { typeof(Fink), e => ((Fink)e)?.Id },
+            { typeof(Barton), e => ((Barton)e)?.Id },
+
+            // owned entities - still need comparers in case they are projected directly
+            { typeof(Order), e => ((Order)e)?.Id },
+            { typeof(OrderDetail), e => ((OrderDetail)e)?.Detail },
+            { typeof(OwnedAddress), e => ((OwnedAddress)e)?.Country.Name },
+            { typeof(OwnedCountry), e => ((OwnedCountry)e)?.Name },
+            { typeof(Element), e => ((Element)e)?.Id },
+            { typeof(Throned), e => ((Throned)e)?.Property }
+        }.ToDictionary(e => e.Key, e => (object)e.Value);
+
+        public IReadOnlyDictionary<Type, object> EntityAsserters { get; } = new Dictionary<Type, Action<object, object>>
+        {
             {
-                { typeof(OwnedPerson), e => ((OwnedPerson)e)?.Id },
-                { typeof(Branch), e => ((Branch)e)?.Id },
-                { typeof(LeafA), e => ((LeafA)e)?.Id },
-                { typeof(LeafB), e => ((LeafB)e)?.Id },
-                { typeof(Planet), e => ((Planet)e)?.Id },
-                { typeof(Star), e => ((Star)e)?.Id },
-                { typeof(Moon), e => ((Moon)e)?.Id },
-                { typeof(Fink), e => ((Fink)e)?.Id },
-                { typeof(Barton), e => ((Barton)e)?.Id },
+                typeof(OwnedPerson), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        var ee = (OwnedPerson)e;
+                        var aa = (OwnedPerson)a;
 
-                // owned entities - still need comparers in case they are projected directly
-                { typeof(Order), e => ((Order)e)?.Id },
-                { typeof(OrderDetail), e => ((OrderDetail)e)?.Detail },
-                { typeof(OwnedAddress), e => ((OwnedAddress)e)?.Country.Name },
-                { typeof(OwnedCountry), e => ((OwnedCountry)e)?.Name },
-                { typeof(Element), e => ((Element)e)?.Id },
-                { typeof(Throned), e => ((Throned)e)?.Property }
-            }.ToDictionary(e => e.Key, e => (object)e.Value);
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee["Name"], aa["Name"]);
+                        AssertAddress(ee.PersonAddress, aa.PersonAddress);
+                        AssertOrders(ee.Orders, aa.Orders);
+                    }
 
-        public IReadOnlyDictionary<Type, object> GetEntityAsserters()
-            => new Dictionary<Type, Action<object, object>>
+                    if (e is Branch branch)
+                    {
+                        AssertAddress(branch.BranchAddress, ((Branch)a).BranchAddress);
+                    }
+
+                    if (e is LeafA leafA)
+                    {
+                        AssertAddress(leafA.LeafAAddress, ((LeafA)a).LeafAAddress);
+                    }
+
+                    if (e is LeafB leafB)
+                    {
+                        AssertAddress(leafB.LeafBAddress, ((LeafB)a).LeafBAddress);
+                    }
+                }
+            },
             {
+                typeof(Branch), (e, a) =>
                 {
-                    typeof(OwnedPerson), (e, a) =>
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
                     {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (OwnedPerson)e;
-                            var aa = (OwnedPerson)a;
+                        var ee = (Branch)e;
+                        var aa = (Branch)a;
 
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee["Name"], aa["Name"]);
-                            AssertAddress(ee.PersonAddress, aa.PersonAddress);
-                            AssertOrders(ee.Orders, aa.Orders);
-                        }
-
-                        if (e is Branch branch)
-                        {
-                            AssertAddress(branch.BranchAddress, ((Branch)a).BranchAddress);
-                        }
-
-                        if (e is LeafA leafA)
-                        {
-                            AssertAddress(leafA.LeafAAddress, ((LeafA)a).LeafAAddress);
-                        }
-
-                        if (e is LeafB leafB)
-                        {
-                            AssertAddress(leafB.LeafBAddress, ((LeafB)a).LeafBAddress);
-                        }
+                        Assert.Equal(ee.Id, aa.Id);
+                        AssertAddress(ee.PersonAddress, aa.PersonAddress);
+                        AssertAddress(ee.BranchAddress, aa.BranchAddress);
+                        AssertOrders(ee.Orders, aa.Orders);
                     }
-                },
-                {
-                    typeof(Branch), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (Branch)e;
-                            var aa = (Branch)a;
 
-                            Assert.Equal(ee.Id, aa.Id);
-                            AssertAddress(ee.PersonAddress, aa.PersonAddress);
-                            AssertAddress(ee.BranchAddress, aa.BranchAddress);
-                            AssertOrders(ee.Orders, aa.Orders);
-                        }
+                    if (e is LeafA leafA)
+                    {
+                        AssertAddress(leafA.LeafAAddress, ((LeafA)a).LeafAAddress);
+                    }
+                }
+            },
+            {
+                typeof(LeafA), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        var ee = (LeafA)e;
+                        var aa = (LeafA)a;
 
-                        if (e is LeafA leafA)
-                        {
-                            AssertAddress(leafA.LeafAAddress, ((LeafA)a).LeafAAddress);
-                        }
+                        Assert.Equal(ee.Id, aa.Id);
+                        AssertAddress(ee.PersonAddress, aa.PersonAddress);
+                        AssertAddress(ee.BranchAddress, aa.BranchAddress);
+                        AssertAddress(ee.LeafAAddress, aa.LeafAAddress);
+                        AssertOrders(ee.Orders, aa.Orders);
                     }
-                },
+                }
+            },
+            {
+                typeof(LeafB), (e, a) =>
                 {
-                    typeof(LeafA), (e, a) =>
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
                     {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (LeafA)e;
-                            var aa = (LeafA)a;
+                        var ee = (LeafB)e;
+                        var aa = (LeafB)a;
 
-                            Assert.Equal(ee.Id, aa.Id);
-                            AssertAddress(ee.PersonAddress, aa.PersonAddress);
-                            AssertAddress(ee.BranchAddress, aa.BranchAddress);
-                            AssertAddress(ee.LeafAAddress, aa.LeafAAddress);
-                            AssertOrders(ee.Orders, aa.Orders);
-                        }
+                        Assert.Equal(ee.Id, aa.Id);
+                        AssertAddress(ee.PersonAddress, aa.PersonAddress);
+                        AssertAddress(ee.LeafBAddress, aa.LeafBAddress);
+                        AssertOrders(ee.Orders, aa.Orders);
                     }
-                },
+                }
+            },
+            {
+                typeof(Planet), (e, a) =>
                 {
-                    typeof(LeafB), (e, a) =>
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
                     {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (LeafB)e;
-                            var aa = (LeafB)a;
+                        var ee = (Planet)e;
+                        var aa = (Planet)a;
 
-                            Assert.Equal(ee.Id, aa.Id);
-                            AssertAddress(ee.PersonAddress, aa.PersonAddress);
-                            AssertAddress(ee.LeafBAddress, aa.LeafBAddress);
-                            AssertOrders(ee.Orders, aa.Orders);
-                        }
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Name, aa.Name);
+                        Assert.Equal(ee.StarId, aa.StarId);
                     }
-                },
+                }
+            },
+            {
+                typeof(Star), (e, a) =>
                 {
-                    typeof(Planet), (e, a) =>
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
                     {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (Planet)e;
-                            var aa = (Planet)a;
+                        var ee = (Star)e;
+                        var aa = (Star)a;
 
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Name, aa.Name);
-                            Assert.Equal(ee.StarId, aa.StarId);
-                        }
-                    }
-                },
-                {
-                    typeof(Star), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Name, aa.Name);
+                        Assert.Equal(ee.Composition.Count, aa.Composition.Count);
+                        foreach (var (eec, aac) in ee.Composition.OrderBy(eec => eec.Id).Zip(aa.Composition.OrderBy(aac => aac.Id)))
                         {
-                            var ee = (Star)e;
-                            var aa = (Star)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Name, aa.Name);
-                            Assert.Equal(ee.Composition.Count, aa.Composition.Count);
-                            foreach (var (eec, aac) in ee.Composition.OrderBy(eec => eec.Id).Zip(aa.Composition.OrderBy(aac => aac.Id)))
-                            {
-                                Assert.Equal(eec.Id, aac.Id);
-                                Assert.Equal(eec.Name, aac.Name);
-                                Assert.Equal(eec.StarId, aac.StarId);
-                            }
-                        }
-                    }
-                },
-                {
-                    typeof(Moon), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (Moon)e;
-                            var aa = (Moon)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.PlanetId, aa.PlanetId);
-                            Assert.Equal(ee.Diameter, aa.Diameter);
-                        }
-                    }
-                },
-                {
-                    typeof(Fink), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            Assert.Equal(((Fink)e).Id, ((Fink)a).Id);
-                        }
-                    }
-                },
-                {
-                    typeof(Barton), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (Barton)e;
-                            var aa = (Barton)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Simple, aa.Simple);
-                            Assert.Equal(ee.Throned.Property, aa.Throned.Property);
-                        }
-                    }
-                },
-
-                // owned entities - still need comparers in case they are projected directly
-                {
-                    typeof(Order), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            Assert.Equal(((Order)e).Id, ((Order)a).Id);
-                        }
-                    }
-                },
-                {
-                    typeof(OrderDetail), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            Assert.Equal(((OrderDetail)e).Detail, ((OrderDetail)a).Detail);
-                        }
-                    }
-                },
-                {
-                    typeof(OwnedAddress), (e, a) =>
-                    {
-                        AssertAddress(((OwnedAddress)e), ((OwnedAddress)a));
-                    }
-                },
-                {
-                    typeof(OwnedCountry), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (OwnedCountry)e;
-                            var aa = (OwnedCountry)a;
-
-                            Assert.Equal(ee.Name, aa.Name);
-                            Assert.Equal(ee.PlanetId, aa.PlanetId);
-                        }
-                    }
-                },
-                {
-                    typeof(Element), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            var ee = (Element)e;
-                            var aa = (Element)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Name, aa.Name);
-                            Assert.Equal(ee.StarId, aa.StarId);
-                        }
-                    }
-                },
-                {
-                    typeof(Throned), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-                        if (a != null)
-                        {
-                            Assert.Equal(((Throned)e).Value, ((Throned)a).Value);
-                            Assert.Equal(((Throned)e).Property, ((Throned)a).Property);
+                            Assert.Equal(eec.Id, aac.Id);
+                            Assert.Equal(eec.Name, aac.Name);
+                            Assert.Equal(eec.StarId, aac.StarId);
                         }
                     }
                 }
-            }.ToDictionary(e => e.Key, e => (object)e.Value);
+            },
+            {
+                typeof(Moon), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        var ee = (Moon)e;
+                        var aa = (Moon)a;
 
-        protected override string StoreName { get; } = "OwnedQueryTest";
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.PlanetId, aa.PlanetId);
+                        Assert.Equal(ee.Diameter, aa.Diameter);
+                    }
+                }
+            },
+            {
+                typeof(Fink), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        Assert.Equal(((Fink)e).Id, ((Fink)a).Id);
+                    }
+                }
+            },
+            {
+                typeof(Barton), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        var ee = (Barton)e;
+                        var aa = (Barton)a;
+
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Simple, aa.Simple);
+                        Assert.Equal(ee.Throned.Property, aa.Throned.Property);
+                    }
+                }
+            },
+
+            // owned entities - still need comparers in case they are projected directly
+            {
+                typeof(Order), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        Assert.Equal(((Order)e).Id, ((Order)a).Id);
+                    }
+                }
+            },
+            {
+                typeof(OrderDetail), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        Assert.Equal(((OrderDetail)e).Detail, ((OrderDetail)a).Detail);
+                    }
+                }
+            },
+            { typeof(OwnedAddress), (e, a) => { AssertAddress(((OwnedAddress)e), ((OwnedAddress)a)); } },
+            {
+                typeof(OwnedCountry), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        var ee = (OwnedCountry)e;
+                        var aa = (OwnedCountry)a;
+
+                        Assert.Equal(ee.Name, aa.Name);
+                        Assert.Equal(ee.PlanetId, aa.PlanetId);
+                    }
+                }
+            },
+            {
+                typeof(Element), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        var ee = (Element)e;
+                        var aa = (Element)a;
+
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Name, aa.Name);
+                        Assert.Equal(ee.StarId, aa.StarId);
+                    }
+                }
+            },
+            {
+                typeof(Throned), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+                    if (a != null)
+                    {
+                        Assert.Equal(((Throned)e).Value, ((Throned)a).Value);
+                        Assert.Equal(((Throned)e).Property, ((Throned)a).Property);
+                    }
+                }
+            }
+        }.ToDictionary(e => e.Key, e => (object)e.Value);
+
+        protected override string StoreName
+            => "OwnedQueryTest";
 
         protected override void OnModelCreating(ModelBuilder modelBuilder, DbContext context)
         {
@@ -1107,8 +1304,7 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
                 eb =>
                 {
                     eb.IndexerProperty<string>("Name");
-                    var ownedPerson = new OwnedPerson { Id = 1 };
-                    ownedPerson["Name"] = "Mona Cy";
+                    var ownedPerson = new OwnedPerson { Id = 1, ["Name"] = "Mona Cy" };
                     eb.HasData(ownedPerson);
 
                     eb.OwnsOne(
@@ -1369,7 +1565,14 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
                         });
                 });
 
-            modelBuilder.Entity<Planet>(pb => pb.HasData(new Planet { Id = 1, StarId = 1, Name = "Earth" }));
+            modelBuilder.Entity<Planet>(
+                pb => pb.HasData(
+                    new Planet
+                    {
+                        Id = 1,
+                        StarId = 1,
+                        Name = "Earth"
+                    }));
 
             modelBuilder.Entity<Moon>(
                 mb => mb.HasData(
@@ -1422,6 +1625,10 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
 
             modelBuilder.Entity<Fink>().HasData(
                 new { Id = 1, BartonId = 1 });
+
+            modelBuilder.Entity<Balloon>();
+            modelBuilder.Entity<HydrogenBalloon>().OwnsOne(e => e.Gas);
+            modelBuilder.Entity<HeliumBalloon>().OwnsOne(e => e.Gas);
         }
 
         public override DbContextOptionsBuilder AddOptions(DbContextOptionsBuilder builder)
@@ -1508,7 +1715,15 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
         }
 
         private static IReadOnlyList<Planet> CreatePlanets()
-            => new List<Planet> { new() { Id = 1, StarId = 1, Name = "Earth" } };
+            => new List<Planet>
+            {
+                new()
+                {
+                    Id = 1,
+                    StarId = 1,
+                    Name = "Earth"
+                }
+            };
 
         private static IReadOnlyList<Star> CreateStars()
             => new List<Star>
@@ -1517,21 +1732,21 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
                 {
                     Id = 1,
                     Name = "Sol",
-                    Composition = new List<Element>
-                    {
-                        new()
+                    Composition =
+                    [
+                        new Element
                         {
                             Id = "H",
                             Name = "Hydrogen",
                             StarId = 1
                         },
-                        new()
+                        new Element
                         {
                             Id = "He",
                             Name = "Helium",
                             StarId = 1
                         }
-                    }
+                    ]
                 }
             };
 
@@ -1548,77 +1763,140 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
 
         private static IReadOnlyList<OwnedPerson> CreateOwnedPeople()
         {
-            var personAddress1 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "USA", PlanetId = 1 } };
-            personAddress1["AddressLine"] = "804 S. Lakeshore Road";
-            personAddress1["ZipCode"] = 38654;
-            var ownedPerson1 = new OwnedPerson { Id = 1, PersonAddress = personAddress1 };
-            ownedPerson1["Name"] = "Mona Cy";
+            var personAddress1 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "USA", PlanetId = 1 },
+                ["AddressLine"] = "804 S. Lakeshore Road",
+                ["ZipCode"] = 38654
+            };
 
-            var personAddress2 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "USA", PlanetId = 1 } };
-            personAddress2["AddressLine"] = "7 Church Dr.";
-            personAddress2["ZipCode"] = 28655;
-            var branchAddress2 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "Canada", PlanetId = 1 } };
-            branchAddress2["BranchName"] = "BranchA";
+            var ownedPerson1 = new OwnedPerson
+            {
+                Id = 1,
+                PersonAddress = personAddress1,
+                ["Name"] = "Mona Cy"
+            };
+
+            var personAddress2 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "USA", PlanetId = 1 },
+                ["AddressLine"] = "7 Church Dr.",
+                ["ZipCode"] = 28655
+            };
+
+            var branchAddress2 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "Canada", PlanetId = 1 },
+                ["BranchName"] = "BranchA"
+            };
 
             var ownedPerson2 = new Branch
             {
                 Id = 2,
                 PersonAddress = personAddress2,
-                BranchAddress = branchAddress2
+                BranchAddress = branchAddress2,
+                ["Name"] = "Antigonus Mitul"
             };
-            ownedPerson2["Name"] = "Antigonus Mitul";
 
-            var personAddress3 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "USA", PlanetId = 1 } };
-            personAddress3["AddressLine"] = "72 Hickory Rd.";
-            personAddress3["ZipCode"] = 07728;
-            var branchAddress3 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "Canada", PlanetId = 1 } };
-            branchAddress3["BranchName"] = "BranchB";
-            var leafAAddress3 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "Mexico", PlanetId = 1 } };
-            leafAAddress3["LeafType"] = 1;
+            var personAddress3 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "USA", PlanetId = 1 },
+                ["AddressLine"] = "72 Hickory Rd.",
+                ["ZipCode"] = 07728
+            };
+
+            var branchAddress3 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "Canada", PlanetId = 1 },
+                ["BranchName"] = "BranchB"
+            };
+
+            var leafAAddress3 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "Mexico", PlanetId = 1 },
+                ["LeafType"] = 1
+            };
+
             var ownedPerson3 = new LeafA
             {
                 Id = 3,
                 PersonAddress = personAddress3,
                 BranchAddress = branchAddress3,
-                LeafAAddress = leafAAddress3
+                LeafAAddress = leafAAddress3,
+                ["Name"] = "Madalena Morana"
             };
-            ownedPerson3["Name"] = "Madalena Morana";
 
-            var personAddress4 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "USA", PlanetId = 1 } };
-            personAddress4["AddressLine"] = "28 Strawberry St.";
-            personAddress4["ZipCode"] = 19053;
-            var leafBAddress4 = new OwnedAddress { PlaceType = "Land", Country = new OwnedCountry { Name = "Panama", PlanetId = 1 } };
-            leafBAddress4["LeafBType"] = "Green";
+            var personAddress4 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "USA", PlanetId = 1 },
+                ["AddressLine"] = "28 Strawberry St.",
+                ["ZipCode"] = 19053
+            };
+
+            var leafBAddress4 = new OwnedAddress
+            {
+                PlaceType = "Land",
+                Country = new OwnedCountry { Name = "Panama", PlanetId = 1 },
+                ["LeafBType"] = "Green"
+            };
+
             var ownedPerson4 = new LeafB
             {
                 Id = 4,
                 PersonAddress = personAddress4,
-                LeafBAddress = leafBAddress4
+                LeafBAddress = leafBAddress4,
+                ["Name"] = "Vanda Waldemar"
             };
-            ownedPerson4["Name"] = "Vanda Waldemar";
 
-            var order1 = new Order { Id = -10, Client = ownedPerson1 };
-            order1["OrderDate"] = Convert.ToDateTime("2018-07-11 10:01:41");
-            order1.Details = new List<OrderDetail> { new() { Detail = "Discounted Order" }, new() { Detail = "Full Price Order" } };
+            var order1 = new Order
+            {
+                Id = -10,
+                Client = ownedPerson1,
+                ["OrderDate"] = Convert.ToDateTime("2018-07-11 10:01:41"),
+                Details = [new OrderDetail { Detail = "Discounted Order" }, new OrderDetail { Detail = "Full Price Order" }]
+            };
 
-            var order2 = new Order { Id = -11, Client = ownedPerson1 };
-            order2["OrderDate"] = Convert.ToDateTime("2015-03-03 04:37:59");
-            order2.Details = new List<OrderDetail>();
+            var order2 = new Order
+            {
+                Id = -11,
+                Client = ownedPerson1,
+                ["OrderDate"] = Convert.ToDateTime("2015-03-03 04:37:59"),
+                Details = []
+            };
             ownedPerson1.Orders = new List<Order> { order1, order2 };
 
-            var order3 = new Order { Id = -20, Client = ownedPerson2 };
-            order3["OrderDate"] = Convert.ToDateTime("2015-05-25 20:35:48");
-            order3.Details = new List<OrderDetail> { new() { Detail = "Internal Order" } };
+            var order3 = new Order
+            {
+                Id = -20,
+                Client = ownedPerson2,
+                ["OrderDate"] = Convert.ToDateTime("2015-05-25 20:35:48"),
+                Details = [new OrderDetail { Detail = "Internal Order" }]
+            };
             ownedPerson2.Orders = new List<Order> { order3 };
 
-            var order4 = new Order { Id = -30, Client = ownedPerson3 };
-            order4["OrderDate"] = Convert.ToDateTime("2014-11-10 04:32:42");
-            order4.Details = new List<OrderDetail> { new() { Detail = "Bulk Order" } };
+            var order4 = new Order
+            {
+                Id = -30,
+                Client = ownedPerson3,
+                ["OrderDate"] = Convert.ToDateTime("2014-11-10 04:32:42"),
+                Details = [new OrderDetail { Detail = "Bulk Order" }]
+            };
             ownedPerson3.Orders = new List<Order> { order4 };
 
-            var order5 = new Order { Id = -40, Client = ownedPerson4 };
-            order5["OrderDate"] = Convert.ToDateTime("2016-04-25 19:23:56");
-            order5.Details = new List<OrderDetail>();
+            var order5 = new Order
+            {
+                Id = -40,
+                Client = ownedPerson4,
+                ["OrderDate"] = Convert.ToDateTime("2016-04-25 19:23:56"),
+                Details = []
+            };
             ownedPerson4.Orders = new List<Order> { order5 };
 
             return new List<OwnedPerson>
@@ -1671,9 +1949,9 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
             leafB.PersonAddress.Country.Planet = planets[0];
             leafB.LeafBAddress.Country.Planet = planets[0];
 
-            planets[0].Moons = new List<Moon> { moons[0] };
+            planets[0].Moons = [moons[0]];
             planets[0].Star = stars[0];
-            stars[0].Planets = new List<Planet> { planets[0] };
+            stars[0].Planets = [planets[0]];
 
             finks[0].Barton = bartons[0];
         }
@@ -1751,27 +2029,13 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
 
         public object this[string name]
         {
-            get
-            {
-                if (string.Equals(name, "Name", StringComparison.Ordinal))
-                {
-                    return _name;
-                }
+            get => string.Equals(name, "Name", StringComparison.Ordinal)
+                ? _name
+                : throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
 
-                throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
-            }
-
-            set
-            {
-                if (string.Equals(name, "Name", StringComparison.Ordinal))
-                {
-                    _name = (string)value;
-                }
-                else
-                {
-                    throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
-                }
-            }
+            set => _name = string.Equals(name, "Name", StringComparison.Ordinal)
+                ? (string)value
+                : throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
         }
 
         public OwnedAddress PersonAddress { get; set; }
@@ -1789,27 +2053,13 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
 
         public object this[string name]
         {
-            get
-            {
-                if (string.Equals(name, "OrderDate", StringComparison.Ordinal))
-                {
-                    return _orderDate;
-                }
+            get => string.Equals(name, "OrderDate", StringComparison.Ordinal)
+                ? _orderDate
+                : throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
 
-                throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
-            }
-
-            set
-            {
-                if (string.Equals(name, "OrderDate", StringComparison.Ordinal))
-                {
-                    _orderDate = (DateTime)value;
-                }
-                else
-                {
-                    throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
-                }
-            }
+            set => _orderDate = string.Equals(name, "OrderDate", StringComparison.Ordinal)
+                ? (DateTime)value
+                : throw new InvalidOperationException($"Indexer property with key {name} is not defined on {nameof(OwnedPerson)}.");
         }
 
         public OwnedPerson Client { get; set; }
@@ -1895,5 +2145,30 @@ public abstract class OwnedQueryTestBase<TFixture> : QueryTestBase<TFixture>
     {
         public int Value { get; set; }
         public string Property { get; set; }
+    }
+
+    protected abstract class Balloon
+    {
+        public string Id { get; set; }
+    }
+
+    protected class Helium
+    {
+        public int X { get; set; }
+    }
+
+    protected class Hydrogen
+    {
+        public int Y { get; set; }
+    }
+
+    protected class HeliumBalloon : Balloon
+    {
+        public Helium Gas { get; set; }
+    }
+
+    protected class HydrogenBalloon : Balloon
+    {
+        public Hydrogen Gas { get; set; }
     }
 }

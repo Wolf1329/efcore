@@ -53,7 +53,7 @@ public class IndexAttributeConventionTest
         var modelBuilder = InMemoryTestHelpers.Instance.CreateConventionBuilder();
         var entityBuilder = modelBuilder.Entity<EntityWithIndex>();
 
-        entityBuilder.HasIndex(new[] { "A", "B" }, "IndexOnAAndB")
+        entityBuilder.HasIndex(["A", "B"], "IndexOnAAndB")
             .IsUnique(false)
             .IsDescending(false, true);
 
@@ -92,9 +92,20 @@ public class IndexAttributeConventionTest
         var modelBuilder = InMemoryTestHelpers.Instance.CreateConventionBuilder();
 
         Assert.Equal(
-            AbstractionsStrings.CollectionArgumentHasEmptyElements("propertyNames"),
+            AbstractionsStrings.CollectionArgumentHasEmptyElements("additionalPropertyNames"),
             Assert.Throws<ArgumentException>(
                 () => modelBuilder.Entity(entityTypeWithInvalidIndex)).Message);
+    }
+
+    [ConditionalFact]
+    public void IndexAttribute_AllDescending_is_applied()
+    {
+        var modelBuilder = InMemoryTestHelpers.Instance.CreateConventionBuilder();
+        var entityBuilder = modelBuilder.Entity<EntityWithTwoIndexes>();
+        modelBuilder.Model.FinalizeModel();
+
+        var allDescendingIndex = entityBuilder.Metadata.FindIndex("IndexOnBAndC")!;
+        Assert.Equal([], allDescendingIndex.IsDescending);
     }
 
     [ConditionalFact]
@@ -136,9 +147,9 @@ public class IndexAttributeConventionTest
         modelBuilder.Model.FinalizeModel();
 
         // assert that the base type is not part of the model
-        Assert.Empty(
-            modelBuilder.Model.GetEntityTypes()
-                .Where(e => e.ClrType == typeof(BaseUnmappedEntityWithIndex)));
+        Assert.DoesNotContain(
+            modelBuilder.Model.GetEntityTypes(),
+            e => e.ClrType == typeof(BaseUnmappedEntityWithIndex));
 
         // assert that we see the index anyway
         var index = (Index)entityBuilder.Metadata.GetIndexes().Single();
@@ -323,7 +334,7 @@ public class IndexAttributeConventionTest
     private ProviderConventionSetBuilderDependencies CreateDependencies()
         => InMemoryTestHelpers.Instance.CreateContextServices().GetRequiredService<ProviderConventionSetBuilderDependencies>();
 
-    [Index(nameof(A), nameof(B), Name = "IndexOnAAndB", IsUnique = true, IsDescending = new[] { true, false })]
+    [Index(nameof(A), nameof(B), Name = "IndexOnAAndB", IsUnique = true, IsDescending = [true, false])]
     private class EntityWithIndex
     {
         public int Id { get; set; }
@@ -332,7 +343,7 @@ public class IndexAttributeConventionTest
     }
 
     [Index(nameof(A), nameof(B), Name = "IndexOnAAndB", IsUnique = true)]
-    [Index(nameof(B), nameof(C), Name = "IndexOnBAndC", IsUnique = false)]
+    [Index(nameof(B), nameof(C), Name = "IndexOnBAndC", IsUnique = false, AllDescending = true)]
     private class EntityWithTwoIndexes
     {
         public int Id { get; set; }
@@ -356,7 +367,9 @@ public class IndexAttributeConventionTest
         public int D { get; set; }
     }
 
+#pragma warning disable CS0618
     [Index]
+#pragma warning restore CS0618
     private class EntityWithInvalidEmptyIndex
     {
         public int Id { get; set; }
@@ -364,7 +377,7 @@ public class IndexAttributeConventionTest
         public int B { get; set; }
     }
 
-    [Index(nameof(A), null, Name = "IndexOnAAndNull")]
+    [Index(nameof(A), (string)null, Name = "IndexOnAAndNull")]
     private class EntityWithInvalidNullIndexProperty
     {
         public int Id { get; set; }

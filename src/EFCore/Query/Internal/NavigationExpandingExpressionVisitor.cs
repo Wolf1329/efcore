@@ -1,7 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore.Internal;
+using ExpressionExtensions = Microsoft.EntityFrameworkCore.Infrastructure.ExpressionExtensions;
 
 namespace Microsoft.EntityFrameworkCore.Query.Internal;
 
@@ -26,8 +28,8 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         { QueryableMethods.LastOrDefaultWithPredicate, QueryableMethods.LastOrDefaultWithoutPredicate }
     };
 
-    private static readonly List<MethodInfo> SupportedFilteredIncludeOperations = new()
-    {
+    private static readonly List<MethodInfo> SupportedFilteredIncludeOperations =
+    [
         QueryableMethods.Where,
         QueryableMethods.OrderBy,
         QueryableMethods.OrderByDescending,
@@ -36,7 +38,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         QueryableMethods.Skip,
         QueryableMethods.Take,
         QueryableMethods.AsQueryable
-    };
+    ];
 
     private readonly QueryTranslationPreprocessor _queryTranslationPreprocessor;
     private readonly QueryCompilationContext _queryCompilationContext;
@@ -46,8 +48,8 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     private readonly ReducingExpressionVisitor _reducingExpressionVisitor;
     private readonly EntityReferenceOptionalMarkingExpressionVisitor _entityReferenceOptionalMarkingExpressionVisitor;
     private readonly RemoveRedundantNavigationComparisonExpressionVisitor _removeRedundantNavigationComparisonExpressionVisitor;
-    private readonly HashSet<string> _parameterNames = new();
-    private readonly ParameterExtractingExpressionVisitor _parameterExtractingExpressionVisitor;
+    private readonly HashSet<string> _parameterNames = [];
+    private readonly ExpressionTreeFuncletizer _funcletizer;
     private readonly INavigationExpansionExtensibilityHelper _extensibilityHelper;
     private readonly HashSet<IEntityType> _nonCyclicAutoIncludeEntityTypes;
 
@@ -78,16 +80,14 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         _entityReferenceOptionalMarkingExpressionVisitor = new EntityReferenceOptionalMarkingExpressionVisitor();
         _removeRedundantNavigationComparisonExpressionVisitor = new RemoveRedundantNavigationComparisonExpressionVisitor(
             queryCompilationContext.Logger);
-        _parameterExtractingExpressionVisitor = new ParameterExtractingExpressionVisitor(
-            evaluatableExpressionFilter,
-            _parameters,
-            _queryCompilationContext.ContextType,
+        _funcletizer = new ExpressionTreeFuncletizer(
             _queryCompilationContext.Model,
-            _queryCompilationContext.Logger,
-            parameterize: false,
-            generateContextAccessors: true);
+            evaluatableExpressionFilter,
+            _queryCompilationContext.ContextType,
+            generateContextAccessors: true,
+            _queryCompilationContext.Logger);
 
-        _nonCyclicAutoIncludeEntityTypes = !_queryCompilationContext.IgnoreAutoIncludes ? new HashSet<IEntityType>() : null!;
+        _nonCyclicAutoIncludeEntityTypes = !_queryCompilationContext.IgnoreAutoIncludes ? [] : null!;
     }
 
     /// <summary>
@@ -100,14 +100,66 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     {
         var result = Visit(query);
 
-        if (result is GroupByNavigationExpansionExpression)
+        if (result is GroupByNavigationExpansionExpression groupByNavigationExpansionExpression)
         {
-            // This indicates that GroupBy was not condensed out of grouping operator.
-            throw new InvalidOperationException(CoreStrings.TranslationFailed(query.Print()));
-        }
+            if (!(groupByNavigationExpansionExpression.Source is MethodCallExpression { Method.IsGenericMethod: true } methodCallExpression
+                    && methodCallExpression.Method.GetGenericMethodDefinition() == QueryableMethods.GroupByWithKeySelector))
+            {
+                // If the final operator is not GroupBy in source then GroupBy is not final operator. We throw exception.
+                throw new InvalidOperationException(CoreStrings.TranslationFailed(query.Print()));
+            }
 
-        result = new PendingSelectorExpandingExpressionVisitor(this, _extensibilityHelper, applyIncludes: true).Visit(result);
-        result = Reduce(result);
+            var groupingQueryable = groupByNavigationExpansionExpression.GroupingEnumerable.Source;
+            var innerEnumerable = new PendingSelectorExpandingExpressionVisitor(this, _extensibilityHelper, applyIncludes: true).Visit(
+                groupByNavigationExpansionExpression.GroupingEnumerable);
+            innerEnumerable = Reduce(innerEnumerable);
+
+            if (innerEnumerable is MethodCallExpression { Method.IsGenericMethod: true } selectMethodCall
+                && selectMethodCall.Method.GetGenericMethodDefinition() == QueryableMethods.Select)
+            {
+                var elementSelector = selectMethodCall.Arguments[1];
+                var elementSelectorLambda = elementSelector.UnwrapLambdaFromQuote();
+
+                // We do have element selector to inject which may have potentially expanded navigations
+                var oldKeySelectorLambda = methodCallExpression.Arguments[1].UnwrapLambdaFromQuote();
+                var newSource = ReplacingExpressionVisitor.Replace(
+                    groupingQueryable, methodCallExpression.Arguments[0], selectMethodCall.Arguments[0]);
+
+                var oldKeySelectorParameterType = oldKeySelectorLambda.Parameters[0].Type;
+                var keySelectorParameter = Expression.Parameter(elementSelectorLambda.Parameters[0].Type);
+                var keySelectorMemberAccess = (Expression)keySelectorParameter;
+                while (keySelectorMemberAccess.Type != oldKeySelectorParameterType)
+                {
+                    keySelectorMemberAccess = Expression.MakeMemberAccess(
+                        keySelectorMemberAccess,
+                        keySelectorMemberAccess.Type.GetTypeInfo().GetDeclaredField("Outer")!);
+                }
+
+                var keySelectorLambda = Expression.Lambda(
+                    ReplacingExpressionVisitor.Replace(
+                        oldKeySelectorLambda.Parameters[0], keySelectorMemberAccess, oldKeySelectorLambda.Body),
+                    keySelectorParameter);
+
+                result = Expression.Call(
+                    QueryableMethods.GroupByWithKeyElementSelector.MakeGenericMethod(
+                        newSource.Type.GetSequenceType(),
+                        keySelectorLambda.ReturnType,
+                        elementSelectorLambda.ReturnType),
+                    newSource,
+                    Expression.Quote(keySelectorLambda),
+                    elementSelector);
+            }
+            else
+            {
+                // Pending selector was identity so nothing to apply, we can return source as-is.
+                result = groupByNavigationExpansionExpression.Source;
+            }
+        }
+        else
+        {
+            result = new PendingSelectorExpandingExpressionVisitor(this, _extensibilityHelper, applyIncludes: true).Visit(result);
+            result = Reduce(result);
+        }
 
         var dbContextOnQueryContextPropertyAccess =
             Expression.Convert(
@@ -146,17 +198,21 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     {
         switch (extensionExpression)
         {
-            case QueryRootExpression queryRootExpression:
-                var entityType = queryRootExpression.EntityType;
+            case EntityQueryRootExpression entityQueryRootExpression:
+                var entityType = entityQueryRootExpression.EntityType;
 #pragma warning disable CS0618 // Type or member is obsolete
                 var definingQuery = entityType.GetDefiningQuery();
 #pragma warning restore CS0618 // Type or member is obsolete
                 NavigationExpansionExpression navigationExpansionExpression;
                 if (definingQuery != null
                     // Apply defining query only when it is not custom query root
-                    && queryRootExpression.GetType() == typeof(QueryRootExpression))
+                    && entityQueryRootExpression.GetType() == typeof(EntityQueryRootExpression))
                 {
-                    var processedDefiningQueryBody = _parameterExtractingExpressionVisitor.ExtractParameters(definingQuery.Body);
+                    // TODO: #33509: merge NRT information (nonNullableReferenceTypeParameters) for parameters introduced by the query
+                    // TODO: filter into the QueryCompilationContext.NonNullableReferenceTypeParameters
+                    var processedDefiningQueryBody = _funcletizer.ExtractParameters(
+                        definingQuery.Body, _parameters, parameterize: false, clearParameterizedValues: false,
+                        _queryCompilationContext.IsPrecompiling);
                     processedDefiningQueryBody = _queryTranslationPreprocessor.NormalizeQueryableMethod(processedDefiningQueryBody);
                     processedDefiningQueryBody = _nullCheckRemovingExpressionVisitor.Visit(processedDefiningQueryBody);
                     processedDefiningQueryBody =
@@ -170,10 +226,29 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
                 }
                 else
                 {
-                    navigationExpansionExpression = CreateNavigationExpansionExpression(queryRootExpression, entityType);
+                    navigationExpansionExpression = CreateNavigationExpansionExpression(
+                        base.VisitExtension(entityQueryRootExpression), entityType);
                 }
 
                 return ApplyQueryFilter(entityType, navigationExpansionExpression);
+
+            // Inline query roots can contain arbitrary expressions, including subqueries with navigations; visit inside to process those.
+            case InlineQueryRootExpression inlineQueryRootExpression:
+            {
+                var visited = inlineQueryRootExpression.Update(this.VisitAndConvert(inlineQueryRootExpression.Values));
+                var currentTree = new NavigationTreeExpression(Expression.Default(inlineQueryRootExpression.ElementType));
+                var parameterName = GetParameterName("e");
+
+                return new NavigationExpansionExpression(visited, currentTree, currentTree, parameterName);
+            }
+
+            case QueryRootExpression queryRootExpression:
+            {
+                var currentTree = new NavigationTreeExpression(Expression.Default(queryRootExpression.ElementType));
+                var parameterName = GetParameterName("e");
+
+                return new NavigationExpansionExpression(queryRootExpression, currentTree, currentTree, parameterName);
+            }
 
             case NavigationExpansionExpression:
             case OwnedNavigationReference:
@@ -244,9 +319,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     protected override Expression VisitMethodCall(MethodCallExpression methodCallExpression)
     {
         var method = methodCallExpression.Method;
-        if (method.DeclaringType == typeof(Queryable)
-            || method.DeclaringType == typeof(QueryableExtensions)
-            || method.DeclaringType == typeof(EntityFrameworkQueryableExtensions))
+        if (method.DeclaringType == typeof(Queryable) || method.DeclaringType == typeof(EntityFrameworkQueryableExtensions))
         {
             var genericMethod = method.IsGenericMethod ? method.GetGenericMethodDefinition() : null;
             // First argument is source
@@ -371,6 +444,16 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
                             methodCallExpression.Arguments[1].UnwrapLambdaFromQuote(),
                             methodCallExpression.Type);
 
+                    case nameof(Queryable.ElementAt)
+                        when genericMethod == QueryableMethods.ElementAt:
+                    case nameof(Queryable.ElementAtOrDefault)
+                        when genericMethod == QueryableMethods.ElementAtOrDefault:
+                        return ProcessElementAt(
+                            source,
+                            genericMethod,
+                            methodCallExpression.Arguments[1],
+                            methodCallExpression.Type);
+
                     case nameof(Queryable.Join)
                         when genericMethod == QueryableMethods.Join:
                     {
@@ -383,25 +466,46 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
                                 innerSource,
                                 methodCallExpression.Arguments[2].UnwrapLambdaFromQuote(),
                                 methodCallExpression.Arguments[3].UnwrapLambdaFromQuote(),
-                                methodCallExpression.Arguments[4].UnwrapLambdaFromQuote());
+                                methodCallExpression.Arguments[4].UnwrapLambdaFromQuote(),
+                                QueryableMethods.Join);
                         }
 
                         goto default;
                     }
 
-                    case nameof(QueryableExtensions.LeftJoin)
-                        when genericMethod == QueryableExtensions.LeftJoinMethodInfo:
+                    case nameof(Queryable.LeftJoin)
+                        when genericMethod == QueryableMethods.LeftJoin:
                     {
                         var secondArgument = Visit(methodCallExpression.Arguments[1]);
                         secondArgument = UnwrapCollectionMaterialization(secondArgument);
                         if (secondArgument is NavigationExpansionExpression innerSource)
                         {
-                            return ProcessLeftJoin(
+                            return ProcessJoin(
                                 source,
                                 innerSource,
                                 methodCallExpression.Arguments[2].UnwrapLambdaFromQuote(),
                                 methodCallExpression.Arguments[3].UnwrapLambdaFromQuote(),
-                                methodCallExpression.Arguments[4].UnwrapLambdaFromQuote());
+                                methodCallExpression.Arguments[4].UnwrapLambdaFromQuote(),
+                                QueryableMethods.LeftJoin);
+                        }
+
+                        goto default;
+                    }
+
+                    case nameof(Queryable.RightJoin)
+                        when genericMethod == QueryableMethods.RightJoin:
+                    {
+                        var secondArgument = Visit(methodCallExpression.Arguments[1]);
+                        secondArgument = UnwrapCollectionMaterialization(secondArgument);
+                        if (secondArgument is NavigationExpansionExpression innerSource)
+                        {
+                            return ProcessJoin(
+                                source,
+                                innerSource,
+                                methodCallExpression.Arguments[2].UnwrapLambdaFromQuote(),
+                                methodCallExpression.Arguments[3].UnwrapLambdaFromQuote(),
+                                methodCallExpression.Arguments[4].UnwrapLambdaFromQuote(),
+                                QueryableMethods.RightJoin);
                         }
 
                         goto default;
@@ -469,6 +573,13 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
                             methodCallExpression.Arguments[1],
                             thenInclude: false,
                             setLoaded: false);
+
+                    // Handled by relational/provider even though method is on `EntityFrameworkQueryableExtensions`
+                    case nameof(EntityFrameworkQueryableExtensions.ExecuteDelete):
+                    case nameof(EntityFrameworkQueryableExtensions.ExecuteDeleteAsync):
+                    case nameof(EntityFrameworkQueryableExtensions.ExecuteUpdate):
+                    case nameof(EntityFrameworkQueryableExtensions.ExecuteUpdateAsync):
+                        return ProcessUnknownMethod(methodCallExpression);
 
                     case nameof(Queryable.GroupBy)
                         when genericMethod == QueryableMethods.GroupByWithKeySelector:
@@ -687,8 +798,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
 
             if (genericMethod == QueryableMethods.AsQueryable)
             {
-                if (firstArgument is NavigationTreeExpression navigationTreeExpression
-                    && navigationTreeExpression.Type.IsGenericType
+                if (firstArgument is NavigationTreeExpression { Type.IsGenericType: true } navigationTreeExpression
                     && navigationTreeExpression.Type.GetGenericTypeDefinition() == typeof(IGrouping<,>))
                 {
                     // This is groupingElement.AsQueryable so we preserve it
@@ -813,7 +923,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
             && entityReference.EntityType.GetAllBaseTypes().Concat(entityReference.EntityType.GetDerivedTypesInclusive())
                 .FirstOrDefault(et => et.ClrType == castType) is IEntityType castEntityType)
         {
-            var newEntityReference = new EntityReference(castEntityType, entityReference.QueryRootExpression);
+            var newEntityReference = new EntityReference(castEntityType, entityReference.EntityQueryRootExpression);
             if (entityReference.IsOptional)
             {
                 newEntityReference.MarkAsOptional();
@@ -849,6 +959,8 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     {
         source = (NavigationExpansionExpression)_pendingSelectorExpandingExpressionVisitor.Visit(source);
         var queryable = Reduce(source);
+
+        item = Visit(item);
 
         return Expression.Call(QueryableMethods.Contains.MakeGenericMethod(queryable.Type.GetSequenceType()), queryable, item);
     }
@@ -888,11 +1000,13 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         return new NavigationExpansionExpression(result, navigationTree, navigationTree, parameterName);
     }
 
-    private static NavigationExpansionExpression ProcessSkipTake(
+    private NavigationExpansionExpression ProcessSkipTake(
         NavigationExpansionExpression source,
         MethodInfo genericMethod,
         Expression count)
     {
+        count = Visit(count);
+
         source.UpdateSource(Expression.Call(genericMethod.MakeGenericMethod(source.SourceElementType), source.Source, count));
 
         return source;
@@ -916,6 +1030,24 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         }
 
         source.ConvertToSingleResult(genericMethod);
+
+        return source;
+    }
+
+    private NavigationExpansionExpression ProcessElementAt(
+        NavigationExpansionExpression source,
+        MethodInfo genericMethod,
+        Expression index,
+        Type returnType)
+    {
+        if (source.PendingSelector.Type != returnType)
+        {
+            source.ApplySelector(Expression.Convert(source.PendingSelector, returnType));
+        }
+
+        index = Visit(index);
+
+        source.ConvertToSingleResult(genericMethod, index);
 
         return source;
     }
@@ -986,8 +1118,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         bool thenInclude,
         bool setLoaded)
     {
-        if (source.PendingSelector is NavigationTreeExpression navigationTree
-            && navigationTree.Value is EntityReference entityReference)
+        if (source.PendingSelector is NavigationTreeExpression { Value: EntityReference entityReference })
         {
 #pragma warning disable CS0618 // Type or member is obsolete
             if (entityReference.EntityType.GetDefiningQuery() != null)
@@ -999,10 +1130,9 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
             }
 #pragma warning restore CS0618 // Type or member is obsolete
 
-            if (expression is ConstantExpression includeConstant
-                && includeConstant.Value is string navigationChain)
+            if (expression is ConstantExpression { Value: string navigationChain })
             {
-                var navigationPaths = navigationChain.Split(new[] { "." }, StringSplitOptions.None);
+                var navigationPaths = navigationChain.Split(["."], StringSplitOptions.None);
                 var includeTreeNodes = new Queue<IncludeTreeNode>();
                 includeTreeNodes.Enqueue(entityReference.IncludePaths);
                 foreach (var navigationName in navigationPaths)
@@ -1070,6 +1200,11 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
 
             if (currentExpression is MethodCallExpression methodCallExpression)
             {
+                if (methodCallExpression.Method.IsEFPropertyMethod())
+                {
+                    return (currentExpression, default);
+                }
+
                 if (!methodCallExpression.Method.IsGenericMethod
                     || !SupportedFilteredIncludeOperations.Contains(methodCallExpression.Method.GetGenericMethodDefinition()))
                 {
@@ -1097,8 +1232,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
 
         static Expression FormatFilter(Expression expression)
         {
-            if (expression is MethodCallExpression methodCallExpression
-                && methodCallExpression.Method.IsGenericMethod
+            if (expression is MethodCallExpression { Method.IsGenericMethod: true } methodCallExpression
                 && SupportedFilteredIncludeOperations.Contains(methodCallExpression.Method.GetGenericMethodDefinition()))
             {
                 if (methodCallExpression.Method.GetGenericMethodDefinition() == QueryableMethods.AsQueryable)
@@ -1123,8 +1257,13 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         NavigationExpansionExpression innerSource,
         LambdaExpression outerKeySelector,
         LambdaExpression innerKeySelector,
-        LambdaExpression resultSelector)
+        LambdaExpression resultSelector,
+        MethodInfo joinMethod)
     {
+        Check.DebugAssert(
+            joinMethod == QueryableMethods.Join || joinMethod == QueryableMethods.LeftJoin || joinMethod == QueryableMethods.RightJoin,
+            "Join method required");
+
         if (innerSource.PendingOrderings.Any())
         {
             ApplyPendingOrderings(innerSource);
@@ -1141,14 +1280,14 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         var newResultSelector = Expression.Lambda(
             Expression.New(
                 transparentIdentifierType.GetConstructors().Single(),
-                new[] { outerSource.CurrentParameter, innerSource.CurrentParameter },
+                [outerSource.CurrentParameter, innerSource.CurrentParameter],
                 transparentIdentifierOuterMemberInfo,
                 transparentIdentifierInnerMemberInfo),
             outerSource.CurrentParameter,
             innerSource.CurrentParameter);
 
         var source = Expression.Call(
-            QueryableMethods.Join.MakeGenericMethod(
+            joinMethod.MakeGenericMethod(
                 outerSource.SourceElementType, innerSource.SourceElementType, outerKeySelector.ReturnType,
                 newResultSelector.ReturnType),
             outerSource.Source,
@@ -1157,62 +1296,22 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
             Expression.Quote(innerKeySelector),
             Expression.Quote(newResultSelector));
 
-        var currentTree = new NavigationTreeNode(outerSource.CurrentTree, innerSource.CurrentTree);
-        var pendingSelector = new ReplacingExpressionVisitor(
-                new Expression[] { resultSelector.Parameters[0], resultSelector.Parameters[1] },
-                new[] { outerSource.PendingSelector, innerSource.PendingSelector })
-            .Visit(resultSelector.Body);
-        var parameterName = GetParameterName("ti");
-
-        return new NavigationExpansionExpression(source, currentTree, pendingSelector, parameterName);
-    }
-
-    private NavigationExpansionExpression ProcessLeftJoin(
-        NavigationExpansionExpression outerSource,
-        NavigationExpansionExpression innerSource,
-        LambdaExpression outerKeySelector,
-        LambdaExpression innerKeySelector,
-        LambdaExpression resultSelector)
-    {
-        if (innerSource.PendingOrderings.Any())
+        var outerPendingSelector = outerSource.PendingSelector;
+        if (joinMethod == QueryableMethods.RightJoin)
         {
-            ApplyPendingOrderings(innerSource);
+            outerPendingSelector = _entityReferenceOptionalMarkingExpressionVisitor.Visit(outerPendingSelector);
         }
-
-        (outerKeySelector, innerKeySelector) = ProcessJoinConditions(outerSource, innerSource, outerKeySelector, innerKeySelector);
-
-        var transparentIdentifierType = TransparentIdentifierFactory.Create(
-            outerSource.SourceElementType, innerSource.SourceElementType);
-
-        var transparentIdentifierOuterMemberInfo = transparentIdentifierType.GetTypeInfo().GetDeclaredField("Outer")!;
-        var transparentIdentifierInnerMemberInfo = transparentIdentifierType.GetTypeInfo().GetDeclaredField("Inner")!;
-
-        var newResultSelector = Expression.Lambda(
-            Expression.New(
-                transparentIdentifierType.GetConstructors().Single(),
-                new[] { outerSource.CurrentParameter, innerSource.CurrentParameter },
-                transparentIdentifierOuterMemberInfo,
-                transparentIdentifierInnerMemberInfo),
-            outerSource.CurrentParameter,
-            innerSource.CurrentParameter);
-
-        var source = Expression.Call(
-            QueryableExtensions.LeftJoinMethodInfo.MakeGenericMethod(
-                outerSource.SourceElementType, innerSource.SourceElementType, outerKeySelector.ReturnType,
-                newResultSelector.ReturnType),
-            outerSource.Source,
-            innerSource.Source,
-            Expression.Quote(outerKeySelector),
-            Expression.Quote(innerKeySelector),
-            Expression.Quote(newResultSelector));
 
         var innerPendingSelector = innerSource.PendingSelector;
-        innerPendingSelector = _entityReferenceOptionalMarkingExpressionVisitor.Visit(innerPendingSelector);
+        if (joinMethod == QueryableMethods.LeftJoin)
+        {
+            innerPendingSelector = _entityReferenceOptionalMarkingExpressionVisitor.Visit(innerPendingSelector);
+        }
 
         var currentTree = new NavigationTreeNode(outerSource.CurrentTree, innerSource.CurrentTree);
         var pendingSelector = new ReplacingExpressionVisitor(
-                new Expression[] { resultSelector.Parameters[0], resultSelector.Parameters[1] },
-                new[] { outerSource.PendingSelector, innerPendingSelector })
+                [resultSelector.Parameters[0], resultSelector.Parameters[1]],
+                [outerPendingSelector, innerPendingSelector])
             .Visit(resultSelector.Body);
         var parameterName = GetParameterName("ti");
 
@@ -1471,11 +1570,13 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         return new NavigationExpansionExpression(newSource, navigationTree, navigationTree, parameterName);
     }
 
-    private static GroupByNavigationExpansionExpression ProcessSkipTake(
+    private GroupByNavigationExpansionExpression ProcessSkipTake(
         GroupByNavigationExpansionExpression groupBySource,
         MethodInfo genericMethod,
         Expression count)
     {
+        count = Visit(count);
+
         groupBySource.UpdateSource(
             Expression.Call(genericMethod.MakeGenericMethod(groupBySource.SourceElementType), groupBySource.Source, count));
 
@@ -1505,8 +1606,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
                 var lambdaBody = Visit(keySelector);
                 lambdaBody = _pendingSelectorExpandingExpressionVisitor.Visit(lambdaBody);
 
-                if (lambdaBody is NavigationTreeExpression navigationTreeExpression
-                    && navigationTreeExpression.Value is EntityReference entityReference)
+                if (lambdaBody is NavigationTreeExpression { Value: EntityReference entityReference } navigationTreeExpression)
                 {
                     var primaryKeyProperties = entityReference.EntityType.FindPrimaryKey()?.Properties;
                     if (primaryKeyProperties != null)
@@ -1535,8 +1635,10 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
 
                 if (lambdaBody is NavigationExpansionExpression navigationExpansionExpression
                     && navigationExpansionExpression.CardinalityReducingGenericMethodInfo != null
-                    && navigationExpansionExpression.PendingSelector is NavigationTreeExpression subqueryNavigationTreeExpression
-                    && subqueryNavigationTreeExpression.Value is EntityReference subqueryEntityReference)
+                    && navigationExpansionExpression.PendingSelector is NavigationTreeExpression
+                    {
+                        Value: EntityReference subqueryEntityReference
+                    })
                 {
                     var primaryKeyProperties = subqueryEntityReference.EntityType.FindPrimaryKey()?.Properties;
                     if (primaryKeyProperties != null)
@@ -1592,11 +1694,26 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         var outerKeyLambda = RemapLambdaExpression(outerSource, outerKeySelector);
         var innerKeyLambda = RemapLambdaExpression(innerSource, innerKeySelector);
 
-        var keyComparison = (BinaryExpression)_removeRedundantNavigationComparisonExpressionVisitor
-            .Visit(Expression.Equal(outerKeyLambda, innerKeyLambda));
+        var keyComparison = _removeRedundantNavigationComparisonExpressionVisitor
+            .Visit(ExpressionExtensions.CreateEqualsExpression(outerKeyLambda, innerKeyLambda));
 
-        outerKeySelector = GenerateLambda(ExpandNavigationsForSource(outerSource, keyComparison.Left), outerSource.CurrentParameter);
-        innerKeySelector = GenerateLambda(ExpandNavigationsForSource(innerSource, keyComparison.Right), innerSource.CurrentParameter);
+        Expression left;
+        Expression right;
+        if (keyComparison is BinaryExpression binaryExpression)
+        {
+            left = binaryExpression.Left;
+            right = binaryExpression.Right;
+        }
+        else
+        {
+            // If the visitor didn't modify the tree into BinaryExpression then it is going to the same method call on top level
+            var methodCall = (MethodCallExpression)keyComparison;
+            left = methodCall.Arguments[0];
+            right = methodCall.Arguments[1];
+        }
+
+        outerKeySelector = GenerateLambda(ExpandNavigationsForSource(outerSource, left), outerSource.CurrentParameter);
+        innerKeySelector = GenerateLambda(ExpandNavigationsForSource(innerSource, right), innerSource.CurrentParameter);
 
         if (outerKeySelector.ReturnType != innerKeySelector.ReturnType)
         {
@@ -1629,14 +1746,18 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
                 if (!_parameterizedQueryFilterPredicateCache.TryGetValue(rootEntityType, out var filterPredicate))
                 {
                     filterPredicate = queryFilter;
-                    filterPredicate = (LambdaExpression)_parameterExtractingExpressionVisitor.ExtractParameters(filterPredicate);
+                    // TODO: #33509: merge NRT information (nonNullableReferenceTypeParameters) for parameters introduced by the query
+                    // TODO: filter into the QueryCompilationContext.NonNullableReferenceTypeParameters
+                    filterPredicate = (LambdaExpression)_funcletizer.ExtractParameters(
+                        filterPredicate, _parameters, parameterize: false, clearParameterizedValues: false,
+                        _queryCompilationContext.IsPrecompiling);
                     filterPredicate = (LambdaExpression)_queryTranslationPreprocessor.NormalizeQueryableMethod(filterPredicate);
 
                     // We need to do entity equality, but that requires a full method call on a query root to properly flow the
                     // entity information through. Construct a MethodCall wrapper for the predicate with the proper query root.
                     var filterWrapper = Expression.Call(
                         QueryableMethods.Where.MakeGenericMethod(rootEntityType.ClrType),
-                        new QueryRootExpression(rootEntityType),
+                        new EntityQueryRootExpression(rootEntityType),
                         filterPredicate);
                     filterPredicate = filterWrapper.Arguments[1].UnwrapLambdaFromQuote();
 
@@ -1680,7 +1801,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
             }
 
             if (!_extensibilityHelper.AreQueryRootsCompatible(
-                    outerEntityReference.QueryRootExpression, innerEntityReference.QueryRootExpression))
+                    outerEntityReference.EntityQueryRootExpression, innerEntityReference.EntityQueryRootExpression))
             {
                 throw new InvalidOperationException(CoreStrings.IncompatibleSourcesForSetOperation);
             }
@@ -1712,14 +1833,12 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     {
         var genericTypeArguments = queryableMethod.IsGenericMethod
             ? queryableMethod.GetGenericArguments()
-            : Array.Empty<Type>();
+            : [];
 
         var enumerableArguments = arguments.Select(
-            arg => arg is UnaryExpression unaryExpression
-                && unaryExpression.NodeType == ExpressionType.Quote
-                && unaryExpression.Operand is LambdaExpression
-                    ? unaryExpression.Operand
-                    : arg).ToList();
+            arg => arg is UnaryExpression { NodeType: ExpressionType.Quote, Operand: LambdaExpression } unaryExpression
+                ? unaryExpression.Operand
+                : arg).ToList();
 
         if (queryableMethod.Name == nameof(Enumerable.Min))
         {
@@ -1835,22 +1954,11 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
     {
         // if sourceExpression is not a query root we will throw when trying to construct temporal root expression
         // regular queries don't use the query root so they will still be fine
-        var entityReference = new EntityReference(entityType, sourceExpression as QueryRootExpression);
+        var entityReference = new EntityReference(entityType, sourceExpression as EntityQueryRootExpression);
         PopulateEagerLoadedNavigations(entityReference.IncludePaths);
 
         var currentTree = new NavigationTreeExpression(entityReference);
         var parameterName = GetParameterName(entityType.ShortName()[0].ToString().ToLowerInvariant());
-
-        return new NavigationExpansionExpression(sourceExpression, currentTree, currentTree, parameterName);
-    }
-
-    private NavigationExpansionExpression CreateNavigationExpansionExpression(
-        Expression sourceExpression,
-        OwnedNavigationReference ownedNavigationReference)
-    {
-        var parameterName = GetParameterName("o");
-        var entityReference = ownedNavigationReference.EntityReference;
-        var currentTree = new NavigationTreeExpression(entityReference);
 
         return new NavigationExpansionExpression(sourceExpression, currentTree, currentTree, parameterName);
     }
@@ -1923,8 +2031,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
 
     private Expression UnwrapCollectionMaterialization(Expression expression)
     {
-        while (expression is MethodCallExpression innerMethodCall
-               && innerMethodCall.Method.IsGenericMethod
+        while (expression is MethodCallExpression { Method.IsGenericMethod: true } innerMethodCall
                && innerMethodCall.Method.GetGenericMethodDefinition() is MethodInfo innerMethod
                && (innerMethod == EnumerableMethods.AsEnumerable
                    || innerMethod == EnumerableMethods.ToList
@@ -1938,14 +2045,37 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
             expression = materializeCollectionNavigationExpression.Subquery;
         }
 
-        return expression is OwnedNavigationReference ownedNavigationReference
-            && ownedNavigationReference.Navigation.IsCollection
-                ? CreateNavigationExpansionExpression(
+        switch (expression)
+        {
+            case OwnedNavigationReference { Navigation.IsCollection: true } ownedNavigationReference:
+            {
+                var currentTree = new NavigationTreeExpression(ownedNavigationReference.EntityReference);
+
+                return new NavigationExpansionExpression(
                     Expression.Call(
                         QueryableMethods.AsQueryable.MakeGenericMethod(ownedNavigationReference.Type.GetSequenceType()),
                         ownedNavigationReference),
-                    ownedNavigationReference)
-                : expression;
+                    currentTree,
+                    currentTree,
+                    GetParameterName("o"));
+            }
+
+            case PrimitiveCollectionReference primitiveCollectionReference:
+            {
+                var currentTree = new NavigationTreeExpression(Expression.Default(primitiveCollectionReference.Type.GetSequenceType()));
+
+                return new NavigationExpansionExpression(
+                    Expression.Call(
+                        QueryableMethods.AsQueryable.MakeGenericMethod(primitiveCollectionReference.Type.GetSequenceType()),
+                        primitiveCollectionReference),
+                    currentTree,
+                    currentTree,
+                    GetParameterName("p"));
+            }
+
+            default:
+                return expression;
+        }
     }
 
     private string GetParameterName(string prefix)
@@ -1968,14 +2098,14 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         if (!_queryCompilationContext.IgnoreAutoIncludes
             && !_nonCyclicAutoIncludeEntityTypes.Contains(entityType))
         {
-            VerifyNoAutoIncludeCycles(entityType, new HashSet<IEntityType>(), new List<INavigationBase>());
+            VerifyNoAutoIncludeCycles(entityType, [], []);
         }
 
         var outboundNavigations = GetOutgoingEagerLoadedNavigations(entityType);
 
         if (_queryCompilationContext.IgnoreAutoIncludes)
         {
-            outboundNavigations = outboundNavigations.Where(n => n is INavigation navigation && navigation.ForeignKey.IsOwnership);
+            outboundNavigations = outboundNavigations.Where(n => n is INavigation { ForeignKey.IsOwnership: true });
         }
 
         foreach (var navigation in outboundNavigations)
@@ -2002,7 +2132,7 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         }
 
         var autoIncludedNavigations = GetOutgoingEagerLoadedNavigations(entityType)
-            .Where(n => !(n is INavigation navigation && navigation.ForeignKey.IsOwnership));
+            .Where(n => n is not INavigation { ForeignKey.IsOwnership: true });
 
         foreach (var navigationBase in autoIncludedNavigations)
         {
@@ -2037,41 +2167,18 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
             case ParameterExpression:
                 return includeTreeNode;
 
-            case MemberExpression memberExpression
-                when memberExpression.Expression != null:
-                var innerExpression = memberExpression.Expression.UnwrapTypeConversion(out var convertedType);
-                var innerIncludeTreeNode = PopulateIncludeTree(includeTreeNode, innerExpression, setLoaded);
-                var entityType = innerIncludeTreeNode.EntityType;
-                if (convertedType != null)
+            case MethodCallExpression methodCallExpression
+                when methodCallExpression.TryGetEFPropertyArguments(out var entityExpression, out var propertyName):
+                if (TryExtractIncludeTreeNode(entityExpression, propertyName, out var addedEfPropertyNode))
                 {
-                    entityType = entityType.GetAllBaseTypes().Concat(entityType.GetDerivedTypesInclusive())
-                        .FirstOrDefault(et => et.ClrType == convertedType);
-                    if (entityType == null)
-                    {
-                        throw new InvalidOperationException(
-                            CoreStrings.InvalidTypeConversationWithInclude(expression, convertedType.ShortDisplayName()));
-                    }
+                    return addedEfPropertyNode;
                 }
 
-                var navigation = entityType.FindNavigation(memberExpression.Member);
-                if (navigation != null)
+                break;
+
+            case MemberExpression { Expression: { } } memberExpression:
+                if (TryExtractIncludeTreeNode(memberExpression.Expression, memberExpression.Member.Name, out var addedNode))
                 {
-                    var addedNode = innerIncludeTreeNode.AddNavigation(navigation, setLoaded);
-
-                    // This is to add eager Loaded navigations when owner type is included.
-                    PopulateEagerLoadedNavigations(addedNode);
-
-                    return addedNode;
-                }
-
-                var skipNavigation = entityType.FindSkipNavigation(memberExpression.Member);
-                if (skipNavigation != null)
-                {
-                    var addedNode = innerIncludeTreeNode.AddNavigation(skipNavigation, setLoaded);
-
-                    // This is to add eager Loaded navigations when owner type is included.
-                    PopulateEagerLoadedNavigations(addedNode);
-
                     return addedNode;
                 }
 
@@ -2079,6 +2186,43 @@ public partial class NavigationExpandingExpressionVisitor : ExpressionVisitor
         }
 
         throw new InvalidOperationException(CoreStrings.InvalidIncludeExpression(expression));
+
+        bool TryExtractIncludeTreeNode(
+            Expression innerExpression,
+            string propertyName,
+            [NotNullWhen(true)] out IncludeTreeNode? addedNode)
+        {
+            innerExpression = innerExpression.UnwrapTypeConversion(out var convertedType);
+            var innerIncludeTreeNode = PopulateIncludeTree(includeTreeNode, innerExpression, setLoaded);
+            var entityType = innerIncludeTreeNode.EntityType;
+
+            if (convertedType != null)
+            {
+                entityType = entityType.GetAllBaseTypes().Concat(entityType.GetDerivedTypesInclusive())
+                    .FirstOrDefault(et => et.ClrType == convertedType);
+                if (entityType == null)
+                {
+                    throw new InvalidOperationException(
+                        CoreStrings.InvalidTypeConversationWithInclude(expression, convertedType.ShortDisplayName()));
+                }
+            }
+
+            var navigation = (INavigationBase?)entityType.FindNavigation(propertyName)
+                ?? entityType.FindSkipNavigation(propertyName);
+
+            if (navigation != null)
+            {
+                addedNode = innerIncludeTreeNode.AddNavigation(navigation, setLoaded);
+
+                // This is to add eager Loaded navigations when owner type is included.
+                PopulateEagerLoadedNavigations(addedNode);
+
+                return true;
+            }
+
+            addedNode = null;
+            return false;
+        }
     }
 
     private Expression Reduce(Expression source)

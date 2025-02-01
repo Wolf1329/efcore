@@ -19,9 +19,7 @@ public class CSharpMigrationOperationGenerator : ICSharpMigrationOperationGenera
     /// </summary>
     /// <param name="dependencies">The dependencies.</param>
     public CSharpMigrationOperationGenerator(CSharpMigrationOperationGeneratorDependencies dependencies)
-    {
-        Dependencies = dependencies;
-    }
+        => Dependencies = dependencies;
 
     /// <summary>
     ///     Dependencies for this service.
@@ -1805,11 +1803,15 @@ public class CSharpMigrationOperationGenerator : ICSharpMigrationOperationGenera
                     .Append(Code.Literal(operation.Schema));
             }
 
-            builder
-                .AppendLine(",")
-                .Append("startValue: ")
-                .Append(Code.Literal(operation.StartValue))
-                .Append(")");
+            if (operation.StartValue.HasValue)
+            {
+                builder
+                    .AppendLine(",")
+                    .Append("startValue: ")
+                    .Append(Code.Literal(operation.StartValue.Value));
+            }
+
+            builder.Append(")");
 
             Annotations(operation.GetAnnotations(), builder);
         }

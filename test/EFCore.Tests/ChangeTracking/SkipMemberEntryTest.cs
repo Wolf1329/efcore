@@ -88,7 +88,6 @@ public class SkipMemberEntryTest
         Assert.IsType<CollectionEntry>(entry);
     }
 
-
     [ConditionalFact]
     public void Can_get_skip_collection_entry_by_name_using_Collection()
     {
@@ -129,7 +128,7 @@ public class SkipMemberEntryTest
     private class Cherry
     {
         public int Id { get; set; }
-        public ICollection<Chunky> Chunkies { get; set; }
+        public ICollection<Chunky> Chunkies { get; }
     }
 
     private class FreezerContext : DbContext

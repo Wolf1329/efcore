@@ -4,16 +4,13 @@
 #pragma warning disable RCS1102 // Make class static.
 namespace Microsoft.EntityFrameworkCore;
 
+#nullable disable
+
 public class ProxyGraphUpdatesSqliteTest
 {
-    public abstract class ProxyGraphUpdatesSqliteTestBase<TFixture> : ProxyGraphUpdatesTestBase<TFixture>
+    public abstract class ProxyGraphUpdatesSqliteTestBase<TFixture>(TFixture fixture) : ProxyGraphUpdatesTestBase<TFixture>(fixture)
         where TFixture : ProxyGraphUpdatesSqliteTestBase<TFixture>.ProxyGraphUpdatesSqliteFixtureBase, new()
     {
-        protected ProxyGraphUpdatesSqliteTestBase(TFixture fixture)
-            : base(fixture)
-        {
-        }
-
         protected override void UseTransaction(DatabaseFacade facade, IDbContextTransaction transaction)
             => facade.UseTransaction(transaction.GetDbTransaction());
 
@@ -27,13 +24,9 @@ public class ProxyGraphUpdatesSqliteTest
         }
     }
 
-    public class LazyLoading : ProxyGraphUpdatesSqliteTestBase<LazyLoading.ProxyGraphUpdatesWithLazyLoadingSqliteFixture>
+    public class LazyLoading(LazyLoading.ProxyGraphUpdatesWithLazyLoadingSqliteFixture fixture)
+        : ProxyGraphUpdatesSqliteTestBase<LazyLoading.ProxyGraphUpdatesWithLazyLoadingSqliteFixture>(fixture)
     {
-        public LazyLoading(ProxyGraphUpdatesWithLazyLoadingSqliteFixture fixture)
-            : base(fixture)
-        {
-        }
-
         protected override bool DoesLazyLoading
             => true;
 
@@ -42,7 +35,8 @@ public class ProxyGraphUpdatesSqliteTest
 
         public class ProxyGraphUpdatesWithLazyLoadingSqliteFixture : ProxyGraphUpdatesSqliteFixtureBase
         {
-            protected override string StoreName { get; } = "ProxyGraphLazyLoadingUpdatesTest";
+            protected override string StoreName
+                => "ProxyGraphLazyLoadingUpdatesTest";
 
             public override DbContextOptionsBuilder AddOptions(DbContextOptionsBuilder builder)
                 => base.AddOptions(builder.UseLazyLoadingProxies());
@@ -52,17 +46,12 @@ public class ProxyGraphUpdatesSqliteTest
         }
     }
 
-    public class ChangeTracking : ProxyGraphUpdatesSqliteTestBase<ChangeTracking.ProxyGraphUpdatesWithChangeTrackingSqliteFixture>
+    public class ChangeTracking(ChangeTracking.ProxyGraphUpdatesWithChangeTrackingSqliteFixture fixture)
+        : ProxyGraphUpdatesSqliteTestBase<ChangeTracking.ProxyGraphUpdatesWithChangeTrackingSqliteFixture>(fixture)
     {
-        public ChangeTracking(ProxyGraphUpdatesWithChangeTrackingSqliteFixture fixture)
-            : base(fixture)
-        {
-        }
-
         // Needs lazy loading
-        public override void Save_two_entity_cycle_with_lazy_loading()
-        {
-        }
+        public override Task Save_two_entity_cycle_with_lazy_loading()
+            => Task.CompletedTask;
 
         protected override bool DoesLazyLoading
             => false;
@@ -72,7 +61,8 @@ public class ProxyGraphUpdatesSqliteTest
 
         public class ProxyGraphUpdatesWithChangeTrackingSqliteFixture : ProxyGraphUpdatesSqliteFixtureBase
         {
-            protected override string StoreName { get; } = "ProxyGraphChangeTrackingUpdatesTest";
+            protected override string StoreName
+                => "ProxyGraphChangeTrackingUpdatesTest";
 
             public override DbContextOptionsBuilder AddOptions(DbContextOptionsBuilder builder)
                 => base.AddOptions(builder.UseChangeTrackingProxies());
@@ -82,14 +72,11 @@ public class ProxyGraphUpdatesSqliteTest
         }
     }
 
-    public class ChangeTrackingAndLazyLoading : ProxyGraphUpdatesSqliteTestBase<
-        ChangeTrackingAndLazyLoading.ProxyGraphUpdatesWithChangeTrackingAndLazyLoadingSqliteFixture>
+    public class ChangeTrackingAndLazyLoading(
+        ChangeTrackingAndLazyLoading.ProxyGraphUpdatesWithChangeTrackingAndLazyLoadingSqliteFixture fixture)
+        : ProxyGraphUpdatesSqliteTestBase<
+            ChangeTrackingAndLazyLoading.ProxyGraphUpdatesWithChangeTrackingAndLazyLoadingSqliteFixture>(fixture)
     {
-        public ChangeTrackingAndLazyLoading(ProxyGraphUpdatesWithChangeTrackingAndLazyLoadingSqliteFixture fixture)
-            : base(fixture)
-        {
-        }
-
         protected override bool DoesLazyLoading
             => true;
 
@@ -98,7 +85,8 @@ public class ProxyGraphUpdatesSqliteTest
 
         public class ProxyGraphUpdatesWithChangeTrackingAndLazyLoadingSqliteFixture : ProxyGraphUpdatesSqliteFixtureBase
         {
-            protected override string StoreName { get; } = "ProxyGraphChangeTrackingAndLazyLoadingUpdatesTest";
+            protected override string StoreName
+                => "ProxyGraphChangeTrackingAndLazyLoadingUpdatesTest";
 
             public override DbContextOptionsBuilder AddOptions(DbContextOptionsBuilder builder)
                 => base.AddOptions(builder.UseChangeTrackingProxies().UseLazyLoadingProxies());

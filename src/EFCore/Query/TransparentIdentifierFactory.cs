@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 
 namespace Microsoft.EntityFrameworkCore.Query;
@@ -28,22 +29,29 @@ public static class TransparentIdentifierFactory
     /// <param name="outerType">The outer type of the transparent identifier.</param>
     /// <param name="innerType">The inner type of the transparent identifier.</param>
     /// <returns>The created transparent identifier type.</returns>
+    [return: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)]
+    [DynamicDependency(DynamicallyAccessedMemberTypes.All, typeof(TransparentIdentifier<,>))]
     public static Type Create(Type outerType, Type innerType)
         => typeof(TransparentIdentifier<,>).MakeGenericType(outerType, innerType);
 
-    private readonly struct TransparentIdentifier<TOuter, TInner>
+    private readonly struct TransparentIdentifier<TOuter, TInner>(TOuter outer, TInner inner)
     {
+        /// <summary>
+        ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+        ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+        ///     any release. You should only use it directly in your code with extreme caution and knowing that
+        ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+        /// </summary>
         [UsedImplicitly]
-        public TransparentIdentifier(TOuter outer, TInner inner)
-        {
-            Outer = outer;
-            Inner = inner;
-        }
+        public readonly TOuter Outer = outer;
 
+        /// <summary>
+        ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+        ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+        ///     any release. You should only use it directly in your code with extreme caution and knowing that
+        ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+        /// </summary>
         [UsedImplicitly]
-        public readonly TOuter Outer;
-
-        [UsedImplicitly]
-        public readonly TInner Inner;
+        public readonly TInner Inner = inner;
     }
 }

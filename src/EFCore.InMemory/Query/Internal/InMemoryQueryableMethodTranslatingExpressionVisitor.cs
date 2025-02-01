@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using ExpressionExtensions = Microsoft.EntityFrameworkCore.Infrastructure.ExpressionExtensions;
+
 namespace Microsoft.EntityFrameworkCore.InMemory.Query.Internal;
 
 /// <summary>
@@ -118,7 +120,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
 
         return new ShapedQueryExpression(
             queryExpression,
-            new EntityShaperExpression(
+            new StructuralTypeShaperExpression(
                 entityType,
                 new ProjectionBindingExpression(
                     queryExpression,
@@ -234,28 +236,12 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
     /// </summary>
     protected override ShapedQueryExpression? TranslateContains(ShapedQueryExpression source, Expression item)
     {
-        var inMemoryQueryExpression = (InMemoryQueryExpression)source.QueryExpression;
-        var newItem = TranslateExpression(item, preserveType: true);
-        if (newItem == null)
-        {
-            return null;
-        }
+        var anyLambdaParameter = Expression.Parameter(item.Type, "p");
+        var anyLambda = Expression.Lambda(
+            ExpressionExtensions.CreateEqualsExpression(anyLambdaParameter, item),
+            anyLambdaParameter);
 
-        item = newItem;
-
-        inMemoryQueryExpression.UpdateServerQueryExpression(
-            Expression.Call(
-                EnumerableMethods.Contains.MakeGenericMethod(item.Type),
-                Expression.Call(
-                    EnumerableMethods.Select.MakeGenericMethod(inMemoryQueryExpression.CurrentParameter.Type, item.Type),
-                    inMemoryQueryExpression.ServerQueryExpression,
-                    Expression.Lambda(
-                        inMemoryQueryExpression.GetProjection(
-                            new ProjectionBindingExpression(inMemoryQueryExpression, new ProjectionMember(), item.Type)),
-                        inMemoryQueryExpression.CurrentParameter)),
-                item));
-
-        return source.UpdateShaperExpression(Expression.Convert(inMemoryQueryExpression.GetSingleScalarProjection(), typeof(bool)));
+        return TranslateAny(source, anyLambda);
     }
 
     /// <summary>
@@ -455,6 +441,9 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
 
                 return memberInitExpression.Update(updatedNewExpression, newBindings);
 
+            case StructuralTypeShaperExpression { ValueBufferExpression: ProjectionBindingExpression } shaper:
+                return shaper;
+
             default:
                 var translation = TranslateExpression(expression);
                 if (translation == null)
@@ -535,7 +524,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
         var left = RemapLambdaBody(outer, outerKeySelector);
         var right = RemapLambdaBody(inner, innerKeySelector);
 
-        var joinCondition = TranslateExpression(Expression.Equal(left, right));
+        var joinCondition = TranslateExpression(ExpressionExtensions.CreateEqualsExpression(left, right));
 
         var (outerKeyBody, innerKeyBody) = DecomposeJoinCondition(joinCondition);
 
@@ -593,9 +582,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
             }
         }
 
-        if (joinCondition is MethodCallExpression methodCallExpression
-            && methodCallExpression.Method.Name == nameof(object.Equals)
-            && methodCallExpression.Arguments.Count == 2
+        if (joinCondition is MethodCallExpression { Method.Name: nameof(object.Equals), Arguments.Count: 2 } methodCallExpression
             && ((methodCallExpression.Method.IsStatic
                     && methodCallExpression.Method.DeclaringType == typeof(object))
                 || typeof(ValueComparer).IsAssignableFrom(methodCallExpression.Method.DeclaringType)))
@@ -752,15 +739,14 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
     /// </summary>
     protected override ShapedQueryExpression? TranslateOfType(ShapedQueryExpression source, Type resultType)
     {
-        if (source.ShaperExpression is EntityShaperExpression entityShaperExpression)
+        if (source.ShaperExpression is StructuralTypeShaperExpression { StructuralType: IEntityType entityType } shaper)
         {
-            var entityType = entityShaperExpression.EntityType;
             if (entityType.ClrType == resultType)
             {
                 return source;
             }
 
-            var parameterExpression = Expression.Parameter(entityShaperExpression.Type);
+            var parameterExpression = Expression.Parameter(shaper.Type);
             var predicate = Expression.Lambda(Expression.TypeIs(parameterExpression, resultType), parameterExpression);
             var newSource = TranslateWhere(source, predicate);
             if (newSource == null)
@@ -774,13 +760,13 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
             var baseType = entityType.GetAllBaseTypes().SingleOrDefault(et => et.ClrType == resultType);
             if (baseType != null)
             {
-                return source.UpdateShaperExpression(entityShaperExpression.WithEntityType(baseType));
+                return source.UpdateShaperExpression(shaper.WithType(baseType));
             }
 
             var derivedType = entityType.GetDerivedTypes().Single(et => et.ClrType == resultType);
             var inMemoryQueryExpression = (InMemoryQueryExpression)source.QueryExpression;
 
-            var projectionBindingExpression = (ProjectionBindingExpression)entityShaperExpression.ValueBufferExpression;
+            var projectionBindingExpression = (ProjectionBindingExpression)shaper.ValueBufferExpression;
             var projectionMember = projectionBindingExpression.ProjectionMember;
             Check.DebugAssert(new ProjectionMember().Equals(projectionMember), "Invalid ProjectionMember when processing OfType");
 
@@ -792,7 +778,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
                     { projectionMember, entityProjectionExpression.UpdateEntityType(derivedType) }
                 });
 
-            return source.UpdateShaperExpression(entityShaperExpression.WithEntityType(derivedType));
+            return source.UpdateShaperExpression(shaper.WithType(derivedType));
         }
 
         return null;
@@ -846,6 +832,20 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
 
         return source;
     }
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    protected override ShapedQueryExpression? TranslateRightJoin(
+        ShapedQueryExpression outer,
+        ShapedQueryExpression inner,
+        LambdaExpression outerKeySelector,
+        LambdaExpression innerKeySelector,
+        LambdaExpression resultSelector)
+        => null;
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -1143,23 +1143,13 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
     private Expression ExpandSharedTypeEntities(InMemoryQueryExpression queryExpression, Expression lambdaBody)
         => _weakEntityExpandingExpressionVisitor.Expand(queryExpression, lambdaBody);
 
-    private sealed class SharedTypeEntityExpandingExpressionVisitor : ExpressionVisitor
+    private sealed class SharedTypeEntityExpandingExpressionVisitor(InMemoryExpressionTranslatingExpressionVisitor expressionTranslator)
+        : ExpressionVisitor
     {
-        private static readonly MethodInfo ObjectEqualsMethodInfo
-            = typeof(object).GetRuntimeMethod(nameof(object.Equals), new[] { typeof(object), typeof(object) })!;
-
-        private readonly InMemoryExpressionTranslatingExpressionVisitor _expressionTranslator;
-
-        private InMemoryQueryExpression _queryExpression;
-
-        public SharedTypeEntityExpandingExpressionVisitor(InMemoryExpressionTranslatingExpressionVisitor expressionTranslator)
-        {
-            _expressionTranslator = expressionTranslator;
-            _queryExpression = null!;
-        }
+        private InMemoryQueryExpression _queryExpression = null!;
 
         public string? TranslationErrorDetails
-            => _expressionTranslator.TranslationErrorDetails;
+            => expressionTranslator.TranslationErrorDetails;
 
         public Expression Expand(InMemoryQueryExpression queryExpression, Expression lambdaBody)
         {
@@ -1190,20 +1180,25 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
         }
 
         protected override Expression VisitExtension(Expression extensionExpression)
-            => extensionExpression is EntityShaperExpression
-                || extensionExpression is ShapedQueryExpression
-                    ? extensionExpression
-                    : base.VisitExtension(extensionExpression);
+            => extensionExpression is StructuralTypeShaperExpression or ShapedQueryExpression or GroupByShaperExpression
+                ? extensionExpression
+                : base.VisitExtension(extensionExpression);
 
         private Expression? TryExpand(Expression? source, MemberIdentity member)
         {
             source = source.UnwrapTypeConversion(out var convertedType);
-            if (source is not EntityShaperExpression entityShaperExpression)
+            if (source is not StructuralTypeShaperExpression shaper)
             {
                 return null;
             }
 
-            var entityType = entityShaperExpression.EntityType;
+            if (shaper.StructuralType is not IEntityType)
+            {
+                return null;
+            }
+
+            var entityType = (IEntityType)shaper.StructuralType;
+
             if (convertedType != null)
             {
                 entityType = entityType.GetRootType().GetDerivedTypesInclusive()
@@ -1242,7 +1237,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
                     .Select(p => p.ClrType)
                     .Any(t => t.IsNullableType());
 
-                var outerKey = entityShaperExpression.CreateKeyValuesExpression(
+                var outerKey = shaper.CreateKeyValuesExpression(
                     navigation.IsOnDependent
                         ? foreignKey.Properties
                         : foreignKey.PrincipalKey.Properties,
@@ -1253,8 +1248,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
                         : foreignKey.Properties,
                     makeNullable);
 
-                var keyComparison = Expression.Call(
-                    ObjectEqualsMethodInfo, AddConvertToObject(outerKey), AddConvertToObject(innerKey));
+                var keyComparison = ExpressionExtensions.CreateEqualsExpression(outerKey, innerKey);
 
                 var predicate = makeNullable
                     ? Expression.AndAlso(
@@ -1270,9 +1264,9 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
                                 .Aggregate((l, r) => Expression.AndAlso(l, r))
                             : Expression.NotEqual(outerKey, Expression.Constant(null, outerKey.Type)),
                         keyComparison)
-                    : (Expression)keyComparison;
+                    : keyComparison;
 
-                var correlationPredicate = _expressionTranslator.Translate(predicate)!;
+                var correlationPredicate = expressionTranslator.Translate(predicate)!;
                 innerQueryExpression.UpdateServerQueryExpression(
                     Expression.Call(
                         EnumerableMethods.Where.MakeGenericMethod(innerQueryExpression.CurrentParameter.Type),
@@ -1283,9 +1277,9 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
             }
 
             var entityProjectionExpression =
-                entityShaperExpression.ValueBufferExpression is ProjectionBindingExpression projectionBindingExpression
+                shaper.ValueBufferExpression is ProjectionBindingExpression projectionBindingExpression
                     ? (EntityProjectionExpression)_queryExpression.GetProjection(projectionBindingExpression)
-                    : (EntityProjectionExpression)entityShaperExpression.ValueBufferExpression;
+                    : (EntityProjectionExpression)shaper.ValueBufferExpression;
             var innerShaper = entityProjectionExpression.BindNavigation(navigation);
             if (innerShaper == null)
             {
@@ -1297,7 +1291,7 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
                     .Select(p => p.ClrType)
                     .Any(t => t.IsNullableType());
 
-                var outerKey = entityShaperExpression.CreateKeyValuesExpression(
+                var outerKey = shaper.CreateKeyValuesExpression(
                     navigation.IsOnDependent
                         ? foreignKey.Properties
                         : foreignKey.PrincipalKey.Properties,
@@ -1314,9 +1308,9 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
                     innerKey = Expression.New(AnonymousObject.AnonymousObjectCtor, innerKey);
                 }
 
-                var outerKeySelector = Expression.Lambda(_expressionTranslator.Translate(outerKey)!, _queryExpression.CurrentParameter);
+                var outerKeySelector = Expression.Lambda(expressionTranslator.Translate(outerKey)!, _queryExpression.CurrentParameter);
                 var innerKeySelector = Expression.Lambda(
-                    _expressionTranslator.Translate(innerKey)!, innerQueryExpression.CurrentParameter);
+                    expressionTranslator.Translate(innerKey)!, innerQueryExpression.CurrentParameter);
                 (outerKeySelector, innerKeySelector) = AlignKeySelectorTypes(outerKeySelector, innerKeySelector);
                 innerShaper = _queryExpression.AddNavigationToWeakEntityType(
                     entityProjectionExpression, navigation, innerQueryExpression, outerKeySelector, innerKeySelector);
@@ -1324,11 +1318,6 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
 
             return innerShaper;
         }
-
-        private static Expression AddConvertToObject(Expression expression)
-            => expression.Type.IsValueType
-                ? Expression.Convert(expression, typeof(object))
-                : expression;
     }
 
     private ShapedQueryExpression TranslateTwoParameterSelector(ShapedQueryExpression source, LambdaExpression resultSelector)
@@ -1451,8 +1440,8 @@ public class InMemoryQueryableMethodTranslatingExpressionVisitor : QueryableMeth
     {
         switch (shaper1)
         {
-            case EntityShaperExpression entityShaperExpression1
-                when shaper2 is EntityShaperExpression entityShaperExpression2:
+            case StructuralTypeShaperExpression entityShaperExpression1
+                when shaper2 is StructuralTypeShaperExpression entityShaperExpression2:
                 return entityShaperExpression1.IsNullable != entityShaperExpression2.IsNullable
                     ? entityShaperExpression1.MakeNullable(makeNullable)
                     : entityShaperExpression1;

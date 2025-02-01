@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
+
 namespace Microsoft.EntityFrameworkCore.Infrastructure;
 
 /// <summary>
@@ -16,7 +18,7 @@ public readonly struct DbSetProperty
     /// <param name="setter">The setter for DbSet property.</param>
     public DbSetProperty(
         string name,
-        Type type,
+        [DynamicallyAccessedMembers(IEntityType.DynamicallyAccessedMemberTypes)] Type type,
         IClrPropertySetter? setter)
     {
         Name = name;
@@ -32,6 +34,7 @@ public readonly struct DbSetProperty
     /// <summary>
     ///     Gets the clr type of entity type this DbSet property represent.
     /// </summary>
+    [DynamicallyAccessedMembers(IEntityType.DynamicallyAccessedMemberTypes)]
     public Type Type { get; }
 
     /// <summary>

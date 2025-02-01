@@ -16,7 +16,7 @@ public class ModificationCommandTest
         var entry = CreateEntry(EntityState.Added, generateKeyValues: true);
         entry.SetTemporaryValue(entry.EntityType.FindPrimaryKey().Properties[0], -1);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -60,7 +60,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Added, generateKeyValues: true);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -104,7 +104,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Added);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -148,7 +148,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Modified, generateKeyValues: true);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -192,7 +192,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Modified);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -236,7 +236,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Modified, computeNonKeyValue: true);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -280,7 +280,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Deleted);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -304,7 +304,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Deleted, computeNonKeyValue: true);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, false, null);
         command.AddEntry(entry, true);
 
         Assert.Equal("T1", command.TableName);
@@ -350,7 +350,7 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Unchanged);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, sensitive, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, sensitive, null);
 
         Assert.Equal(
             sensitive
@@ -366,71 +366,13 @@ public class ModificationCommandTest
     {
         var entry = CreateEntry(EntityState.Detached);
 
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, sensitive, null);
+        var command = CreateModificationCommand(entry, new ParameterNameGenerator().GenerateNext, sensitive, null);
 
         Assert.Equal(
             sensitive
                 ? RelationalStrings.ModificationCommandInvalidEntityStateSensitive("T1", "{Id: 1}", EntityState.Detached)
                 : RelationalStrings.ModificationCommandInvalidEntityState("T1", EntityState.Detached),
             Assert.Throws<InvalidOperationException>(() => command.AddEntry(entry, true)).Message);
-    }
-
-    [ConditionalFact]
-    public void RequiresResultPropagation_false_for_Delete_operation()
-    {
-        var entry = CreateEntry(
-            EntityState.Deleted, generateKeyValues: true, computeNonKeyValue: true);
-
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
-        command.AddEntry(entry, true);
-
-        Assert.False(command.RequiresResultPropagation);
-    }
-
-    [ConditionalFact]
-    public void RequiresResultPropagation_true_for_Insert_operation_if_store_generated_columns_exist()
-    {
-        var entry = CreateEntry(
-            EntityState.Added, generateKeyValues: true, computeNonKeyValue: true);
-
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
-        command.AddEntry(entry, true);
-
-        Assert.True(command.RequiresResultPropagation);
-    }
-
-    [ConditionalFact]
-    public void RequiresResultPropagation_false_for_Insert_operation_if_no_store_generated_columns_exist()
-    {
-        var entry = CreateEntry(EntityState.Added);
-
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
-        command.AddEntry(entry, true);
-
-        Assert.False(command.RequiresResultPropagation);
-    }
-
-    [ConditionalFact]
-    public void RequiresResultPropagation_true_for_Update_operation_if_non_key_store_generated_columns_exist()
-    {
-        var entry = CreateEntry(
-            EntityState.Modified, generateKeyValues: true, computeNonKeyValue: true);
-
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
-        command.AddEntry(entry, true);
-
-        Assert.True(command.RequiresResultPropagation);
-    }
-
-    [ConditionalFact]
-    public void RequiresResultPropagation_false_for_Update_operation_if_no_non_key_store_generated_columns_exist()
-    {
-        var entry = CreateEntry(EntityState.Modified, generateKeyValues: true);
-
-        var command = CreateModificationCommand("T1", null, new ParameterNameGenerator().GenerateNext, false, null);
-        command.AddEntry(entry, true);
-
-        Assert.False(command.RequiresResultPropagation);
     }
 
     private class T1
@@ -442,7 +384,7 @@ public class ModificationCommandTest
 
     private static IModel BuildModel(bool generateKeyValues, bool computeNonKeyValue)
     {
-        var modelBuilder = RelationalTestHelpers.Instance.CreateConventionBuilder();
+        var modelBuilder = FakeRelationalTestHelpers.Instance.CreateConventionBuilder();
         var model = modelBuilder.Model;
         var entityType = model.AddEntityType(typeof(T1));
 
@@ -473,7 +415,7 @@ public class ModificationCommandTest
     {
         var model = BuildModel(generateKeyValues, computeNonKeyValue);
 
-        return RelationalTestHelpers.Instance.CreateInternalEntry(
+        return FakeRelationalTestHelpers.Instance.CreateInternalEntry(
             model,
             entityState,
             new
@@ -486,16 +428,15 @@ public class ModificationCommandTest
     }
 
     private static IModificationCommand CreateModificationCommand(
-        string tableName,
-        string schemaName,
+        InternalEntityEntry entry,
         Func<string> generateParameterName,
         bool sensitiveLoggingEnabled,
         IComparer<IUpdateEntry> comparer)
         => new ModificationCommandFactory().CreateModificationCommand(
             new ModificationCommandParameters(
-                tableName,
-                schemaName,
+                entry.EntityType.GetTableMappings().Single().Table,
                 sensitiveLoggingEnabled,
+                detailedErrorsEnabled: false,
                 comparer,
                 generateParameterName));
 }

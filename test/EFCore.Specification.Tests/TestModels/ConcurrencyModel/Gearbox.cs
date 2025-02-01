@@ -3,8 +3,19 @@
 
 namespace Microsoft.EntityFrameworkCore.TestModels.ConcurrencyModel;
 
+#nullable disable
+
 public class Gearbox
 {
+    public class GearboxProxy(
+        int id,
+        string name) : Gearbox(id, name), IF1Proxy
+    {
+        public bool CreatedCalled { get; set; }
+        public bool InitializingCalled { get; set; }
+        public bool InitializedCalled { get; set; }
+    }
+
     public Gearbox()
     {
     }
@@ -13,6 +24,8 @@ public class Gearbox
     {
         Id = id;
         Name = name;
+
+        Assert.IsType<GearboxProxy>(this);
     }
 
     public int Id { get; set; }

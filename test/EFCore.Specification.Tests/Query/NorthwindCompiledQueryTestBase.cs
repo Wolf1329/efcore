@@ -2,22 +2,18 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Microsoft.EntityFrameworkCore.TestModels.Northwind;
-using Xunit.Sdk;
 
 // ReSharper disable AccessToModifiedClosure
 // ReSharper disable InconsistentNaming
 // ReSharper disable ConvertToExpressionBodyWhenPossible
 namespace Microsoft.EntityFrameworkCore.Query;
 
-public abstract class NorthwindCompiledQueryTestBase<TFixture> : IClassFixture<TFixture>
+#nullable disable
+
+public abstract class NorthwindCompiledQueryTestBase<TFixture>(TFixture fixture) : IClassFixture<TFixture>
     where TFixture : NorthwindQueryFixtureBase<NoopModelCustomizer>, new()
 {
-    protected NorthwindCompiledQueryTestBase(TFixture fixture)
-    {
-        Fixture = fixture;
-    }
-
-    protected TFixture Fixture { get; }
+    protected TFixture Fixture { get; } = fixture;
 
     [ConditionalFact]
     public virtual void DbSet_query()
@@ -208,12 +204,12 @@ public abstract class NorthwindCompiledQueryTestBase<TFixture> : IClassFixture<T
 
         using (var context = CreateContext())
         {
-            query(context, new[] { "ALFKI" });
+            Assert.Equal(1, query(context, ["ALFKI"]).Count());
         }
 
         using (var context = CreateContext())
         {
-            query(context, new[] { "ANATR" });
+            Assert.Equal(1, query(context, ["ANATR"]).Count());
         }
     }
 
@@ -226,12 +222,12 @@ public abstract class NorthwindCompiledQueryTestBase<TFixture> : IClassFixture<T
 
         using (var context = CreateContext())
         {
-            Assert.Equal("ALFKI", query(context, new[] { "ALFKI" }).First().CustomerID);
+            Assert.Equal("ALFKI", query(context, ["ALFKI"]).First().CustomerID);
         }
 
         using (var context = CreateContext())
         {
-            Assert.Equal("ANATR", query(context, new[] { "ANATR" }).First().CustomerID);
+            Assert.Equal("ANATR", query(context, ["ANATR"]).First().CustomerID);
         }
     }
 
@@ -466,12 +462,12 @@ public abstract class NorthwindCompiledQueryTestBase<TFixture> : IClassFixture<T
 
         using (var context = CreateContext())
         {
-            await Enumerate(query(context, new[] { "ALFKI" }));
+            Assert.Equal(1, await CountAsync(query(context, ["ALFKI"])));
         }
 
         using (var context = CreateContext())
         {
-            await Enumerate(query(context, new[] { "ANATR" }));
+            Assert.Equal(1, await CountAsync(query(context, ["ANATR"])));
         }
     }
 
@@ -537,11 +533,8 @@ public abstract class NorthwindCompiledQueryTestBase<TFixture> : IClassFixture<T
             context.TenantPrefix = "A";
 
             // Parameter-specific evaluation in ParameterExtractor. Issue #19209.
-            Assert.Equal(
-                "4",
-                Assert.Throws<EqualException>(
-                    () =>
-                        Assert.Equal(6, query(context).Count())).Actual);
+            // Assert.Equal(6, query(context).Count())
+            Assert.Equal(4, query(context).Count());
 
             context.TenantPrefix = "B";
             Assert.Equal(4, query(context).Count());
@@ -847,27 +840,19 @@ public abstract class NorthwindCompiledQueryTestBase<TFixture> : IClassFixture<T
                 "CHOPS", "CONSH", default));
     }
 
-    [ConditionalFact]
-    public virtual void MakeBinary_does_not_throw_for_unsupported_operator()
+    protected async Task<int> CountAsync<T>(IAsyncEnumerable<T> source)
     {
-        var query = EF.CompileQuery(
-            (NorthwindContext context, object[] parameters)
-                => context.Customers.Where(c => c.CustomerID == (string)parameters[0]));
-
-        using var context = CreateContext();
-
-        var result = query(context, new[] { "ALFKI" }).ToList();
-
-        Assert.Single(result);
-    }
-
-    protected async Task Enumerate<T>(IAsyncEnumerable<T> source)
-    {
+        var count = 0;
         await foreach (var _ in source)
         {
+            count++;
         }
+
+        return count;
     }
 
     protected NorthwindContext CreateContext()
         => Fixture.CreateContext();
+
+    public static IEnumerable<object[]> IsAsyncData = new object[][] { [false], [true] };
 }

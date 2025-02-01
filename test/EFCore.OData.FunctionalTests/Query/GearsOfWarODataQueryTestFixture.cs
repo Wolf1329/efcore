@@ -12,13 +12,12 @@ public class GearsOfWarODataQueryTestFixture : GearsOfWarQuerySqlServerFixture, 
 {
     private IHost _selfHostServer;
 
-    protected override string StoreName { get; } = "ODataGearsOfWarQueryTest";
+    protected override string StoreName
+        => "ODataGearsOfWarQueryTest";
 
     public GearsOfWarODataQueryTestFixture()
-    {
-        (BaseAddress, ClientFactory, _selfHostServer)
+        => (BaseAddress, ClientFactory, _selfHostServer)
             = ODataQueryTestFixtureInitializer.Initialize<GearsOfWarODataContext>(StoreName, GetEdmModel());
-    }
 
     private static IEdmModel GetEdmModel()
     {

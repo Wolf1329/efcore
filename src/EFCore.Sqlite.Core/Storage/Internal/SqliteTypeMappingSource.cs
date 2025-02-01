@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Text.Json;
+
 namespace Microsoft.EntityFrameworkCore.Sqlite.Storage.Internal;
 
 /// <summary>
@@ -48,15 +50,15 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
             "POLYGONZM"
         };
 
-    private const string IntegerTypeName = "INTEGER";
-    private const string RealTypeName = "REAL";
-    private const string BlobTypeName = "BLOB";
-    private const string TextTypeName = "TEXT";
+    internal const string IntegerTypeName = "INTEGER";
+    internal const string RealTypeName = "REAL";
+    internal const string BlobTypeName = "BLOB";
+    internal const string TextTypeName = "TEXT";
 
     private static readonly LongTypeMapping Integer = new(IntegerTypeName);
     private static readonly DoubleTypeMapping Real = new(RealTypeName);
-    private static readonly ByteArrayTypeMapping Blob = new(BlobTypeName);
-    private static readonly SqliteStringTypeMapping Text = new(TextTypeName);
+    private static readonly SqliteByteArrayTypeMapping Blob = new(BlobTypeName);
+    private static readonly SqliteStringTypeMapping Text = SqliteStringTypeMapping.Default;
 
     private readonly Dictionary<Type, RelationalTypeMapping> _clrTypeMappings = new()
     {
@@ -70,17 +72,18 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
         { typeof(sbyte), new SByteTypeMapping(IntegerTypeName) },
         { typeof(short), new ShortTypeMapping(IntegerTypeName) },
         { typeof(uint), new UIntTypeMapping(IntegerTypeName) },
-        { typeof(ulong), new SqliteULongTypeMapping(IntegerTypeName) },
+        { typeof(ulong), SqliteULongTypeMapping.Default },
         { typeof(ushort), new UShortTypeMapping(IntegerTypeName) },
-        { typeof(DateTime), new SqliteDateTimeTypeMapping(TextTypeName) },
-        { typeof(DateTimeOffset), new SqliteDateTimeOffsetTypeMapping(TextTypeName) },
+        { typeof(DateTime), SqliteDateTimeTypeMapping.Default },
+        { typeof(DateTimeOffset), SqliteDateTimeOffsetTypeMapping.Default },
         { typeof(TimeSpan), new TimeSpanTypeMapping(TextTypeName) },
-        { typeof(DateOnly), new SqliteDateOnlyTypeMapping(TextTypeName) },
-        { typeof(TimeOnly), new SqliteTimeOnlyTypeMapping(TextTypeName) },
-        { typeof(decimal), new SqliteDecimalTypeMapping(TextTypeName) },
+        { typeof(DateOnly), SqliteDateOnlyTypeMapping.Default },
+        { typeof(TimeOnly), SqliteTimeOnlyTypeMapping.Default },
+        { typeof(decimal), SqliteDecimalTypeMapping.Default },
         { typeof(double), Real },
         { typeof(float), new FloatTypeMapping(RealTypeName) },
-        { typeof(Guid), new SqliteGuidTypeMapping(TextTypeName) }
+        { typeof(Guid), SqliteGuidTypeMapping.Default },
+        { typeof(JsonElement), SqliteJsonTypeMapping.Default }
     };
 
     private readonly Dictionary<string, RelationalTypeMapping> _storeTypeMappings = new(StringComparer.OrdinalIgnoreCase)
@@ -121,17 +124,23 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
     /// </summary>
     protected override RelationalTypeMapping? FindMapping(in RelationalTypeMappingInfo mappingInfo)
     {
-        var mapping = base.FindMapping(mappingInfo) ?? FindRawMapping(mappingInfo);
+        var mapping = base.FindMapping(mappingInfo)
+            ?? FindRawMapping(mappingInfo);
 
         return mapping != null
             && mappingInfo.StoreTypeName != null
-                ? mapping.Clone(mappingInfo.StoreTypeName, null)
+                ? mapping.WithStoreTypeAndSize(mappingInfo.StoreTypeName, null)
                 : mapping;
     }
 
     private RelationalTypeMapping? FindRawMapping(RelationalTypeMappingInfo mappingInfo)
     {
         var clrType = mappingInfo.ClrType;
+        if (clrType == typeof(byte[]) && mappingInfo.ElementTypeMapping != null)
+        {
+            return null;
+        }
+
         if (clrType != null
             && _clrTypeMappings.TryGetValue(clrType, out var mapping))
         {
@@ -140,7 +149,8 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
 
         var storeTypeName = mappingInfo.StoreTypeName;
         if (storeTypeName != null
-            && _storeTypeMappings.TryGetValue(storeTypeName, out mapping))
+            && _storeTypeMappings.TryGetValue(storeTypeName, out mapping)
+            && (clrType == null || mapping.ClrType.UnwrapNullableType() == clrType))
         {
             return mapping;
         }
@@ -149,15 +159,16 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
         {
             var affinityTypeMapping = _typeRules.Select(r => r(storeTypeName)).FirstOrDefault(r => r != null);
 
-            if (affinityTypeMapping == null)
+            if (affinityTypeMapping != null)
             {
-                return Blob;
+                return clrType == null || affinityTypeMapping.ClrType.UnwrapNullableType() == clrType
+                    ? affinityTypeMapping
+                    : null;
             }
 
-            if (clrType == null
-                || affinityTypeMapping.ClrType.UnwrapNullableType() == clrType)
+            if (clrType == null || clrType == typeof(byte[]))
             {
-                return affinityTypeMapping;
+                return Blob;
             }
         }
 
@@ -165,7 +176,7 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
     }
 
     private readonly Func<string, RelationalTypeMapping?>[] _typeRules =
-    {
+    [
         name => Contains(name, "INT")
             ? Integer
             : null,
@@ -175,15 +186,14 @@ public class SqliteTypeMappingSource : RelationalTypeMappingSource
                 ? Text
                 : null,
         name => Contains(name, "BLOB")
-            || Contains(name, "BIN")
-                ? Blob
-                : null,
+            ? Blob
+            : null,
         name => Contains(name, "REAL")
             || Contains(name, "FLOA")
             || Contains(name, "DOUB")
                 ? Real
                 : null
-    };
+    ];
 
     private static bool Contains(string haystack, string needle)
         => haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;

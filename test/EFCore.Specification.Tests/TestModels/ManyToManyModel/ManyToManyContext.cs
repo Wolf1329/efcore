@@ -5,22 +5,28 @@ using Microsoft.EntityFrameworkCore.Proxies.Internal;
 
 namespace Microsoft.EntityFrameworkCore.TestModels.ManyToManyModel;
 
-public class ManyToManyContext : PoolableDbContext
-{
-    public ManyToManyContext(DbContextOptions options)
-        : base(options)
-    {
-    }
+#nullable disable
 
+public class ManyToManyContext(DbContextOptions options) : PoolableDbContext(options)
+{
     public DbSet<EntityOne> EntityOnes { get; set; }
     public DbSet<EntityTwo> EntityTwos { get; set; }
     public DbSet<EntityThree> EntityThrees { get; set; }
     public DbSet<EntityCompositeKey> EntityCompositeKeys { get; set; }
     public DbSet<EntityRoot> EntityRoots { get; set; }
+    public DbSet<EntityTableSharing1> EntityTableSharing1s { get; set; }
+    public DbSet<EntityTableSharing2> EntityTableSharing2s { get; set; }
     public DbSet<ImplicitManyToManyA> ImplicitManyToManyAs { get; set; }
     public DbSet<ImplicitManyToManyB> ImplicitManyToManyBs { get; set; }
     public DbSet<GeneratedKeysLeft> GeneratedKeysLefts { get; set; }
     public DbSet<GeneratedKeysRight> GeneratedKeysRights { get; set; }
+    public DbSet<UnidirectionalEntityOne> UnidirectionalEntityOnes { get; set; }
+    public DbSet<UnidirectionalEntityTwo> UnidirectionalEntityTwos { get; set; }
+    public DbSet<UnidirectionalEntityThree> UnidirectionalEntityThrees { get; set; }
+    public DbSet<UnidirectionalEntityCompositeKey> UnidirectionalEntityCompositeKeys { get; set; }
+    public DbSet<UnidirectionalEntityRoot> UnidirectionalEntityRoots { get; set; }
+    public DbSet<UnidirectionalGeneratedKeysLeft> UnidirectionalGeneratedKeysLefts { get; set; }
+    public DbSet<UnidirectionalGeneratedKeysRight> UnidirectionalGeneratedKeysRights { get; set; }
 }
 
 public static class ManyToManyContextExtensions

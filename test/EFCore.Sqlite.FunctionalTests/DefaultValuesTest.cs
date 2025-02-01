@@ -1,10 +1,11 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore;
+
+#nullable disable
 
 public class DefaultValuesTest : SharedStoreFixtureBase<DbContext>
 {
@@ -31,7 +32,8 @@ public class DefaultValuesTest : SharedStoreFixtureBase<DbContext>
         }
     }
 
-    protected override string StoreName { get; } = "DefaultKettleChips";
+    protected override string StoreName
+        => "DefaultKettleChips";
 
     protected override ITestStoreFactory TestStoreFactory
         => SqliteTestStoreFactory.Instance;
@@ -41,13 +43,8 @@ public class DefaultValuesTest : SharedStoreFixtureBase<DbContext>
     private ChipsContext CreateChipsContext()
         => (ChipsContext)CreateContext();
 
-    private class ChipsContext : PoolableDbContext
+    private class ChipsContext(DbContextOptions options) : PoolableDbContext(options)
     {
-        public ChipsContext(DbContextOptions options)
-            : base(options)
-        {
-        }
-
         // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<KettleChips> Chips { get; set; }
 

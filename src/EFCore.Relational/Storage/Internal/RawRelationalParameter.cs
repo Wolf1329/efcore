@@ -21,13 +21,8 @@ public class RawRelationalParameter : RelationalParameterBase
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    public RawRelationalParameter(
-        string invariantName,
-        DbParameter parameter)
-        : base(invariantName)
-    {
-        _parameter = parameter;
-    }
+    public RawRelationalParameter(string invariantName, DbParameter parameter) : base(invariantName)
+        => _parameter = parameter;
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -35,7 +30,7 @@ public class RawRelationalParameter : RelationalParameterBase
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    public override void AddDbParameter(DbCommand command, IReadOnlyDictionary<string, object?> parameterValues)
+    public override void AddDbParameter(DbCommand command, IReadOnlyDictionary<string, object?>? parameterValues)
         => AddDbParameter(command, _parameter);
 
     /// <summary>
@@ -50,11 +45,18 @@ public class RawRelationalParameter : RelationalParameterBase
             value is DbParameter,
             $"{nameof(value)} isn't a DbParameter in {nameof(RawRelationalParameter)}.{nameof(AddDbParameter)}");
 
-        if (value is DbParameter dbParameter
-            && dbParameter.Direction == ParameterDirection.Input
-            && value is ICloneable cloneable)
+        if (value is DbParameter dbParameter)
         {
-            value = cloneable.Clone();
+            if (command.Parameters.Contains(dbParameter.ParameterName))
+            {
+                return;
+            }
+
+            if (dbParameter.Direction == ParameterDirection.Input
+                && value is ICloneable cloneable)
+            {
+                value = cloneable.Clone();
+            }
         }
 
         command.Parameters.Add(value);

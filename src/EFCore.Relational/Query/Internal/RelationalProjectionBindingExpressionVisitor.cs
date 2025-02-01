@@ -24,7 +24,7 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
     private SelectExpression _selectExpression;
 
     private bool _indexBasedBinding;
-    private Dictionary<EntityProjectionExpression, ProjectionBindingExpression>? _entityProjectionCache;
+    private Dictionary<StructuralTypeProjectionExpression, ProjectionBindingExpression>? _projectionBindingCache;
     private List<Expression>? _clientProjections;
 
     private readonly Dictionary<ProjectionMember, Expression> _projectionMapping = new();
@@ -64,9 +64,9 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
         if (result == QueryCompilationContext.NotTranslatedExpression)
         {
             _indexBasedBinding = true;
-            _entityProjectionCache = new Dictionary<EntityProjectionExpression, ProjectionBindingExpression>();
+            _projectionBindingCache = new Dictionary<StructuralTypeProjectionExpression, ProjectionBindingExpression>();
             _projectionMapping.Clear();
-            _clientProjections = new List<Expression>();
+            _clientProjections = [];
 
             result = Visit(expression);
 
@@ -93,132 +93,163 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    [return: NotNullIfNotNull("expression")]
+    [return: NotNullIfNotNull(nameof(expression))]
     public override Expression? Visit(Expression? expression)
     {
-        if (expression == null)
+        switch (expression)
         {
-            return null;
-        }
+            case NewExpression or MemberInitExpression or StructuralTypeShaperExpression or IncludeExpression:
+                return base.Visit(expression);
 
-        if (!(expression is NewExpression
-                || expression is MemberInitExpression
-                || expression is EntityShaperExpression
-                || expression is IncludeExpression))
-        {
-            if (_indexBasedBinding)
+            case null:
+                return null;
+
+            case not null when _indexBasedBinding:
             {
                 switch (expression)
                 {
                     case ConstantExpression:
                         return expression;
 
+                    case QueryParameterExpression queryParameterExpression:
+                        return Expression.Call(
+                            GetParameterValueMethodInfo.MakeGenericMethod(queryParameterExpression.Type),
+                            QueryCompilationContext.QueryContextParameter,
+                            Expression.Constant(queryParameterExpression.Name));
+
                     case ParameterExpression parameterExpression:
-                        return parameterExpression.Name?.StartsWith(
-                                QueryCompilationContext.QueryParameterPrefix, StringComparison.Ordinal)
-                            == true
-                                ? Expression.Call(
-                                    GetParameterValueMethodInfo.MakeGenericMethod(parameterExpression.Type),
-                                    QueryCompilationContext.QueryContextParameter,
-                                    Expression.Constant(parameterExpression.Name))
-                                : throw new InvalidOperationException(CoreStrings.TranslationFailed(parameterExpression.Print()));
+                        throw new InvalidOperationException(CoreStrings.TranslationFailed(parameterExpression.Print()));
 
                     case ProjectionBindingExpression projectionBindingExpression:
-                        var mappedProjection = _selectExpression.GetProjection(projectionBindingExpression);
-                        if (mappedProjection is EntityProjectionExpression entityProjection)
+                        return _selectExpression.GetProjection(projectionBindingExpression) switch
                         {
-                            return AddClientProjection(entityProjection, typeof(ValueBuffer));
-                        }
-
-                        if (mappedProjection is SqlExpression mappedSqlExpression)
-                        {
-                            return AddClientProjection(mappedSqlExpression, expression.Type.MakeNullable());
-                        }
-
-                        throw new InvalidOperationException(CoreStrings.TranslationFailed(projectionBindingExpression.Print()));
+                            StructuralTypeProjectionExpression projection => AddClientProjection(projection, typeof(ValueBuffer)),
+                            SqlExpression mappedSqlExpression => AddClientProjection(mappedSqlExpression, expression.Type.MakeNullable()),
+                            _ => throw new InvalidOperationException(CoreStrings.TranslationFailed(projectionBindingExpression.Print()))
+                        };
 
                     case MaterializeCollectionNavigationExpression materializeCollectionNavigationExpression:
+                        if (materializeCollectionNavigationExpression.Navigation.TargetEntityType.IsMappedToJson())
+                        {
+                            var subquery = materializeCollectionNavigationExpression.Subquery;
+                            if (subquery is MethodCallExpression { Method.IsGenericMethod: true } methodCallSubquery)
+                            {
+                                // strip .Select(x => x) and .AsQueryable() from the JsonCollectionResultExpression
+                                if (methodCallSubquery.Method.GetGenericMethodDefinition() == QueryableMethods.Select
+                                    && methodCallSubquery.Arguments[0] is MethodCallExpression selectSourceMethod)
+                                {
+                                    methodCallSubquery = selectSourceMethod;
+                                }
+
+                                if (methodCallSubquery.Method.IsGenericMethod
+                                    && methodCallSubquery.Method.GetGenericMethodDefinition() == QueryableMethods.AsQueryable)
+                                {
+                                    subquery = methodCallSubquery.Arguments[0];
+                                }
+                            }
+
+                            if (subquery is JsonQueryExpression jsonQueryExpression)
+                            {
+                                Check.DebugAssert(
+                                    jsonQueryExpression.IsCollection,
+                                    "JsonQueryExpression inside materialize collection should always be a collection.");
+
+                                _clientProjections!.Add(jsonQueryExpression);
+
+                                return new CollectionResultExpression(
+                                    new ProjectionBindingExpression(
+                                        _selectExpression, _clientProjections!.Count - 1, jsonQueryExpression.Type),
+                                    materializeCollectionNavigationExpression.Navigation,
+                                    materializeCollectionNavigationExpression.Navigation.ClrType.GetSequenceType());
+                            }
+                        }
+
                         _clientProjections!.Add(
                             _queryableMethodTranslatingExpressionVisitor.TranslateSubquery(
                                 materializeCollectionNavigationExpression.Subquery)!);
+
                         return new CollectionResultExpression(
                             // expression.Type will be CLR type of the navigation here so that is fine.
                             new ProjectionBindingExpression(_selectExpression, _clientProjections.Count - 1, expression.Type),
                             materializeCollectionNavigationExpression.Navigation,
                             materializeCollectionNavigationExpression.Navigation.ClrType.GetSequenceType());
-
-                    case MethodCallExpression methodCallExpression:
-                        if (methodCallExpression.Method.IsGenericMethod
-                            && methodCallExpression.Method.DeclaringType == typeof(Enumerable)
-                            && methodCallExpression.Method.Name == nameof(Enumerable.ToList)
-                            && methodCallExpression.Arguments.Count == 1
-                            && methodCallExpression.Arguments[0].Type.TryGetElementType(typeof(IQueryable<>)) != null)
-                        {
-                            var subquery = _queryableMethodTranslatingExpressionVisitor.TranslateSubquery(
-                                methodCallExpression.Arguments[0]);
-                            if (subquery != null)
-                            {
-                                _clientProjections!.Add(subquery);
-                                // expression.Type here will be List<T>
-                                return new CollectionResultExpression(
-                                    new ProjectionBindingExpression(_selectExpression, _clientProjections.Count - 1, expression.Type),
-                                    navigation: null,
-                                    methodCallExpression.Method.GetGenericArguments()[0]);
-                            }
-                        }
-                        else
-                        {
-                            var subquery = _queryableMethodTranslatingExpressionVisitor.TranslateSubquery(methodCallExpression);
-                            if (subquery != null)
-                            {
-                                // This simplifies the check when subquery is translated and can be lifted as scalar.
-                                var scalarTranslation = _sqlTranslator.Translate(subquery);
-                                if (scalarTranslation != null)
-                                {
-                                    return AddClientProjection(scalarTranslation, expression.Type.MakeNullable());
-                                }
-
-                                _clientProjections!.Add(subquery);
-                                var type = expression.Type;
-
-                                if (type.IsGenericType
-                                    && type.GetGenericTypeDefinition() == typeof(IQueryable<>))
-                                {
-                                    type = typeof(List<>).MakeGenericType(type.GetSequenceType());
-                                }
-
-                                var projectionBindingExpression = new ProjectionBindingExpression(
-                                    _selectExpression, _clientProjections.Count - 1, type);
-                                return subquery.ResultCardinality == ResultCardinality.Enumerable
-                                    ? new CollectionResultExpression(
-                                        projectionBindingExpression, navigation: null, subquery.ShaperExpression.Type)
-                                    : projectionBindingExpression;
-                            }
-                        }
-
-                        break;
                 }
 
-                var translation = _sqlTranslator.Translate(expression);
-                return translation != null
-                    ? AddClientProjection(translation, expression.Type.MakeNullable())
-                    : base.Visit(expression);
-            }
-            else
-            {
-                var translation = _sqlTranslator.Translate(expression);
-                if (translation == null)
+                if (_sqlTranslator.TranslateProjection(expression) is SqlExpression sqlExpression)
                 {
-                    return QueryCompilationContext.NotTranslatedExpression;
+                    return AddClientProjection(sqlExpression, expression.Type.MakeNullable());
                 }
 
-                _projectionMapping[_projectionMembers.Peek()] = translation;
+                if (expression is MethodCallExpression methodCallExpression)
+                {
+                    if (methodCallExpression is
+                        {
+                            Method.IsGenericMethod: true,
+                            Method.Name: nameof(Enumerable.ToList),
+                            Method: var method,
+                            Arguments: [var argument]
+                        }
+                        && method.DeclaringType == typeof(Enumerable)
+                        && argument.Type.TryGetElementType(typeof(IQueryable<>)) != null)
+                    {
+                        if (_queryableMethodTranslatingExpressionVisitor.TranslateSubquery(argument) is ShapedQueryExpression subquery)
+                        {
+                            _clientProjections!.Add(subquery);
+                            // expression.Type here will be List<T>
+                            return new CollectionResultExpression(
+                                new ProjectionBindingExpression(_selectExpression, _clientProjections.Count - 1, expression.Type),
+                                navigation: null,
+                                methodCallExpression.Method.GetGenericArguments()[0]);
+                        }
+                    }
+                    else
+                    {
+                        var subquery = _queryableMethodTranslatingExpressionVisitor.TranslateSubquery(methodCallExpression);
+                        if (subquery != null)
+                        {
+                            _clientProjections!.Add(subquery);
+                            var type = expression.Type;
+                            if (type.IsGenericType
+                                && type.GetGenericTypeDefinition() == typeof(IQueryable<>))
+                            {
+                                type = typeof(List<>).MakeGenericType(type.GetSequenceType());
+                            }
 
-                return new ProjectionBindingExpression(_selectExpression, _projectionMembers.Peek(), expression.Type.MakeNullable());
+                            var projectionBindingExpression = new ProjectionBindingExpression(
+                                _selectExpression, _clientProjections.Count - 1, type);
+                            return subquery.ResultCardinality == ResultCardinality.Enumerable
+                                ? new CollectionResultExpression(
+                                    projectionBindingExpression, navigation: null, subquery.ShaperExpression.Type)
+                                : projectionBindingExpression;
+                        }
+                    }
+                }
+
+                return base.Visit(expression);
+            }
+
+            default:
+            {
+                switch (_sqlTranslator.TranslateProjection(expression))
+                {
+                    case SqlExpression sqlExpression:
+                        _projectionMapping[_projectionMembers.Peek()] = sqlExpression;
+                        return new ProjectionBindingExpression(
+                            _selectExpression, _projectionMembers.Peek(), expression.Type.MakeNullable());
+
+                    // This handles the case of a complex type being projected out of a Select.
+                    // Note that an entity type being projected is (currently) handled differently
+                    case RelationalStructuralTypeShaperExpression { StructuralType: IComplexType } shaper:
+                        return base.Visit(shaper);
+
+                    case null or RelationalStructuralTypeShaperExpression { StructuralType: IEntityType }:
+                        return QueryCompilationContext.NotTranslatedExpression;
+
+                    default:
+                        throw new UnreachableException();
+                }
             }
         }
-
-        return base.Visit(expression);
     }
 
     /// <summary>
@@ -268,11 +299,29 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
     {
         switch (extensionExpression)
         {
-            case EntityShaperExpression entityShaperExpression:
+            case StructuralTypeShaperExpression shaper:
             {
                 // TODO: Make this easier to understand some day.
-                EntityProjectionExpression entityProjectionExpression;
-                if (entityShaperExpression.ValueBufferExpression is ProjectionBindingExpression projectionBindingExpression)
+                StructuralTypeProjectionExpression projection;
+
+                if (shaper.ValueBufferExpression is JsonQueryExpression jsonQueryExpression)
+                {
+                    if (_indexBasedBinding)
+                    {
+                        _clientProjections!.Add(jsonQueryExpression);
+                        var jsonProjectionBinding = new ProjectionBindingExpression(
+                            _selectExpression, _clientProjections.Count - 1, typeof(ValueBuffer));
+
+                        return shaper.Update(jsonProjectionBinding);
+                    }
+
+                    _projectionMapping[_projectionMembers.Peek()] = jsonQueryExpression;
+
+                    return shaper.Update(
+                        new ProjectionBindingExpression(_selectExpression, _projectionMembers.Peek(), typeof(ValueBuffer)));
+                }
+
+                if (shaper.ValueBufferExpression is ProjectionBindingExpression projectionBindingExpression)
                 {
                     if (projectionBindingExpression.ProjectionMember == null
                         && !_indexBasedBinding)
@@ -282,34 +331,60 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
                         return QueryCompilationContext.NotTranslatedExpression;
                     }
 
-                    entityProjectionExpression =
-                        (EntityProjectionExpression)((SelectExpression)projectionBindingExpression.QueryExpression)
+                    var projection2 = ((SelectExpression)projectionBindingExpression.QueryExpression)
                         .GetProjection(projectionBindingExpression);
+                    if (projection2 is JsonQueryExpression jsonQuery)
+                    {
+                        if (_indexBasedBinding)
+                        {
+                            var projectionBinding = AddClientProjection(jsonQuery, typeof(ValueBuffer));
+
+                            return shaper.Update(projectionBinding);
+                        }
+
+                        _projectionMapping[_projectionMembers.Peek()] = jsonQuery;
+
+                        return shaper.Update(
+                            new ProjectionBindingExpression(_selectExpression, _projectionMembers.Peek(), typeof(ValueBuffer)));
+                    }
+
+                    projection = (StructuralTypeProjectionExpression)projection2;
                 }
                 else
                 {
-                    entityProjectionExpression = (EntityProjectionExpression)entityShaperExpression.ValueBufferExpression;
+                    projection = (StructuralTypeProjectionExpression)shaper.ValueBufferExpression;
                 }
 
                 if (_indexBasedBinding)
                 {
-                    if (!_entityProjectionCache!.TryGetValue(entityProjectionExpression, out var entityProjectionBinding))
+                    if (!_projectionBindingCache!.TryGetValue(projection, out var entityProjectionBinding))
                     {
-                        entityProjectionBinding = AddClientProjection(entityProjectionExpression, typeof(ValueBuffer));
-                        _entityProjectionCache[entityProjectionExpression] = entityProjectionBinding;
+                        entityProjectionBinding = AddClientProjection(projection, typeof(ValueBuffer));
+                        _projectionBindingCache[projection] = entityProjectionBinding;
                     }
 
-                    return entityShaperExpression.Update(entityProjectionBinding);
+                    return shaper.Update(entityProjectionBinding);
                 }
 
-                _projectionMapping[_projectionMembers.Peek()] = entityProjectionExpression;
+                _projectionMapping[_projectionMembers.Peek()] = projection;
 
-                return entityShaperExpression.Update(
+                return shaper.Update(
                     new ProjectionBindingExpression(_selectExpression, _projectionMembers.Peek(), typeof(ValueBuffer)));
             }
 
-            case IncludeExpression:
-                return _indexBasedBinding ? base.VisitExtension(extensionExpression) : QueryCompilationContext.NotTranslatedExpression;
+            case IncludeExpression includeExpression:
+            {
+                if (_indexBasedBinding)
+                {
+                    // we prune nested json includes - we only need the first level of include so that we know the json column
+                    // and the json entity that is the start of the include chain - the rest will be added in the shaper phase
+                    return includeExpression.Navigation.DeclaringEntityType.IsMappedToJson()
+                        ? Visit(includeExpression.EntityExpression)
+                        : base.VisitExtension(extensionExpression);
+                }
+
+                return QueryCompilationContext.NotTranslatedExpression;
+            }
 
             case CollectionResultExpression collectionResultExpression:
             {
@@ -431,9 +506,7 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
             }
 
             newBindings[i] = VisitMemberBinding(memberInitExpression.Bindings[i]);
-            if (newBindings[i] is MemberAssignment memberAssignment
-                && memberAssignment.Expression is UnaryExpression unaryExpression
-                && unaryExpression.NodeType == ExpressionType.Convert
+            if (newBindings[i] is MemberAssignment { Expression: UnaryExpression { NodeType: ExpressionType.Convert } unaryExpression }
                 && unaryExpression.Operand == QueryCompilationContext.NotTranslatedExpression)
             {
                 return QueryCompilationContext.NotTranslatedExpression;
@@ -548,8 +621,7 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
     {
         var operand = Visit(unaryExpression.Operand);
 
-        return (unaryExpression.NodeType == ExpressionType.Convert
-                || unaryExpression.NodeType == ExpressionType.ConvertChecked)
+        return unaryExpression.NodeType is ExpressionType.Convert or ExpressionType.ConvertChecked
             && unaryExpression.Type == operand.Type
                 ? operand
                 : unaryExpression.Update(MatchTypes(operand, unaryExpression.Operand.Type));
@@ -581,8 +653,13 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
         return new ProjectionBindingExpression(_selectExpression, existingIndex, type);
     }
 
-#pragma warning disable IDE0052 // Remove unread private members
-    private static T GetParameterValue<T>(QueryContext queryContext, string parameterName)
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    public static T GetParameterValue<T>(QueryContext queryContext, string parameterName)
 #pragma warning restore IDE0052 // Remove unread private members
         => (T)queryContext.ParameterValues[parameterName]!;
 
@@ -599,7 +676,7 @@ public class RelationalProjectionBindingExpressionVisitor : ExpressionVisitor
             return _containsInclude;
         }
 
-        [return: NotNullIfNotNull("expression")]
+        [return: NotNullIfNotNull(nameof(expression))]
         public override Expression? Visit(Expression? expression)
             => _containsInclude ? expression : base.Visit(expression);
 

@@ -402,6 +402,8 @@ public class DbContextLoggerTests
     {
         var options = configureLogging(
                 new DbContextOptionsBuilder<LoggingContext>()
+                    .ConfigureWarnings(wb => wb.Log((CoreEventId.ContextInitialized, LogLevel.Information)))
+                    .EnableServiceProviderCaching(false)
                     .UseInMemoryDatabase("DbContextLoggerTests"))
             .Options;
 
@@ -441,11 +443,5 @@ public class DbContextLoggerTests
         return builder.ToString();
     }
 
-    private class LoggingContext : DbContext
-    {
-        public LoggingContext(DbContextOptions options)
-            : base(options)
-        {
-        }
-    }
+    private class LoggingContext(DbContextOptions options) : DbContext(options);
 }

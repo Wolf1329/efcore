@@ -3,14 +3,16 @@
 
 namespace Microsoft.EntityFrameworkCore.TestModels.FunkyDataModel;
 
+#nullable disable
+
 public class FunkyDataData : ISetSource
 {
+    public static readonly FunkyDataData Instance = new();
+
     public IReadOnlyList<FunkyCustomer> FunkyCustomers { get; }
 
-    public FunkyDataData()
-    {
-        FunkyCustomers = CreateFunkyCustomers();
-    }
+    private FunkyDataData()
+        => FunkyCustomers = CreateFunkyCustomers();
 
     public virtual IQueryable<TEntity> Set<TEntity>()
         where TEntity : class

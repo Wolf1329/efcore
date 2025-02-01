@@ -18,7 +18,7 @@ public class BufferedDataReader : DbDataReader
     private readonly bool _detailedErrorsEnabled;
 
     private DbDataReader? _underlyingReader;
-    private List<BufferedDataRecord> _bufferedDataRecords = new();
+    private List<BufferedDataRecord> _bufferedDataRecords = [];
     private BufferedDataRecord _currentResultSet;
     private int _currentResultSetNumber;
     private int _recordsAffected;
@@ -836,9 +836,7 @@ public class BufferedDataReader : DbDataReader
         public object GetValue(int ordinal)
             => GetFieldValue<object>(ordinal);
 
-#pragma warning disable IDE0060 // Remove unused parameter
         public static int GetValues(object[] values)
-#pragma warning restore IDE0060 // Remove unused parameter
             => throw new NotSupportedException();
 
         public T GetFieldValue<T>(int ordinal)
@@ -1235,7 +1233,9 @@ public class BufferedDataReader : DbDataReader
             if (FieldCount < _columns.Count)
             {
                 // Non-composed FromSql
-                var firstMissingColumn = _columns.Select(c => c?.Name).Where(c => c != null).Except(_columnNames).FirstOrDefault();
+                var readerColumns = _fieldNameLookup.Value;
+
+                var firstMissingColumn = _columns.Select(c => c?.Name).FirstOrDefault(c => c != null && !readerColumns.ContainsKey(c));
                 if (firstMissingColumn != null)
                 {
                     throw new InvalidOperationException(RelationalStrings.FromSqlMissingColumn(firstMissingColumn));
@@ -1264,7 +1264,12 @@ public class BufferedDataReader : DbDataReader
 
                     if (!readerColumns.TryGetValue(column.Name!, out var ordinal))
                     {
-                        throw new InvalidOperationException(RelationalStrings.FromSqlMissingColumn(column.Name));
+                        if (_columns.Count != 1)
+                        {
+                            throw new InvalidOperationException(RelationalStrings.FromSqlMissingColumn(column.Name));
+                        }
+
+                        ordinal = 0;
                     }
 
                     newColumnMap[ordinal] = column;

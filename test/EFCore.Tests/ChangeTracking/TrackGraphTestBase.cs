@@ -23,6 +23,87 @@ public abstract class TrackGraphTestBase
 
             return traversal;
         }
+
+        [ConditionalTheory] // Issue #26461
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Can_iterate_over_graph_using_public_surface(bool async)
+        {
+            using var context = new EarlyLearningCenter(GetType().Name);
+            var category = new Category
+            {
+                Id = 1,
+                Products =
+                [
+                    new Product
+                    {
+                        Id = 1,
+                        CategoryId = 1,
+                        Details = new ProductDetails { Id = 1 }
+                    },
+                    new Product
+                    {
+                        Id = 2,
+                        CategoryId = 1,
+                        Details = new ProductDetails { Id = 2 }
+                    },
+                    new Product
+                    {
+                        Id = 3,
+                        CategoryId = 1,
+                        Details = new ProductDetails { Id = 3 }
+                    }
+                ]
+            };
+
+            var rootEntry = context.Attach(category);
+
+            var graphIterator = context.GetService<IEntityEntryGraphIterator>();
+
+            var visited = new HashSet<object>();
+            var traversal = new List<string>();
+
+            bool Callback(EntityEntryGraphNode<HashSet<object>> node)
+            {
+                if (node.NodeState.Contains(node.Entry.Entity))
+                {
+                    return false;
+                }
+
+                node.NodeState.Add(node.Entry.Entity);
+
+                traversal.Add(NodeString(node));
+
+                return true;
+            }
+
+            if (async)
+            {
+                await graphIterator.TraverseGraphAsync(
+                    new EntityEntryGraphNode<HashSet<object>>(rootEntry, visited, null, null),
+                    (node, _) => Task.FromResult(Callback(node)));
+            }
+            else
+            {
+                graphIterator.TraverseGraph(
+                    new EntityEntryGraphNode<HashSet<object>>(rootEntry, visited, null, null),
+                    Callback);
+            }
+
+            Assert.Equal(
+                [
+                    "<None> -----> Category:1",
+                    "Category:1 ---Products--> Product:1",
+                    "Product:1 ---Details--> ProductDetails:1",
+                    "Category:1 ---Products--> Product:2",
+                    "Product:2 ---Details--> ProductDetails:2",
+                    "Category:1 ---Products--> Product:3",
+                    "Product:3 ---Details--> ProductDetails:3"
+                ],
+                traversal);
+
+            Assert.Equal(7, visited.Count);
+        }
     }
 
     public class TrackGraphTestWithState : TrackGraphTestBase
@@ -81,12 +162,12 @@ public abstract class TrackGraphTestBase
         using var context = new EarlyLearningCenter(GetType().Name);
         var category = new NullbileCategory
         {
-            Products = new List<NullbileProduct>
-            {
-                new(),
-                new(),
-                new()
-            }
+            Products =
+            [
+                new NullbileProduct(),
+                new NullbileProduct(),
+                new NullbileProduct()
+            ]
         };
 
         if (setKeys)
@@ -330,12 +411,12 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 1,
-            Products = new List<Product>
-            {
-                new() { Id = 1 },
-                new() { Id = 2 },
-                new() { Id = 3 }
-            }
+            Products =
+            [
+                new Product { Id = 1 },
+                new Product { Id = 2 },
+                new Product { Id = 3 }
+            ]
         };
 
         Assert.Equal(
@@ -498,12 +579,12 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 1,
-            Products = new List<Product>
-            {
-                new() { Id = 1 },
+            Products =
+            [
+                new Product { Id = 1 },
                 existingProduct,
-                new() { Id = 3 }
-            }
+                new Product { Id = 3 }
+            ]
         };
 
         Assert.Equal(
@@ -543,27 +624,27 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 1,
-            Products = new List<Product>
-            {
-                new()
+            Products =
+            [
+                new Product
                 {
                     Id = 1,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 1 }
                 },
-                new()
+                new Product
                 {
                     Id = 2,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 2 }
                 },
-                new()
+                new Product
                 {
                     Id = 3,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 3 }
                 }
-            }
+            ]
         };
 
         Assert.Equal(
@@ -712,12 +793,12 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 1,
-            Products = new List<Product>
-            {
-                new() { Id = 1 },
-                new() { Id = 2 },
-                new() { Id = 3 }
-            }
+            Products =
+            [
+                new Product { Id = 1 },
+                new Product { Id = 2 },
+                new Product { Id = 3 }
+            ]
         };
 
         context.Attach(category);
@@ -762,12 +843,12 @@ public abstract class TrackGraphTestBase
 
         if (trackNewDependents)
         {
-            newCategory.Products = new List<Product>
-            {
-                new() { Id = 1 },
-                new() { Id = 2 },
-                new() { Id = 3 }
-            };
+            newCategory.Products =
+            [
+                new Product { Id = 1 },
+                new Product { Id = 2 },
+                new Product { Id = 3 }
+            ];
         }
 
         if (delayCascade && trackNewDependents)
@@ -780,13 +861,13 @@ public abstract class TrackGraphTestBase
         {
             Assert.Equal(
                 trackNewDependents
-                    ? new List<string>
-                    {
+                    ?
+                    [
                         "<None> -----> Category:1",
                         "Category:1 ---Products--> Product:1",
                         "Category:1 ---Products--> Product:2",
                         "Category:1 ---Products--> Product:3"
-                    }
+                    ]
                     : new List<string> { "<None> -----> Category:1" },
                 TrackGraph());
 
@@ -857,27 +938,27 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 1,
-            Products = new List<Product>
-            {
-                new()
+            Products =
+            [
+                new Product
                 {
                     Id = 1,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 1 }
                 },
-                new()
+                new Product
                 {
                     Id = 2,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 2 }
                 },
-                new()
+                new Product
                 {
                     Id = 3,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 3 }
                 }
-            }
+            ]
         };
 
         var visited = new HashSet<object>();
@@ -901,8 +982,7 @@ public abstract class TrackGraphTestBase
             });
 
         Assert.Equal(
-            new List<string>
-            {
+            [
                 "<None> -----> Category:1",
                 "Category:1 ---Products--> Product:1",
                 "Product:1 ---Details--> ProductDetails:1",
@@ -910,7 +990,7 @@ public abstract class TrackGraphTestBase
                 "Product:2 ---Details--> ProductDetails:2",
                 "Category:1 ---Products--> Product:3",
                 "Product:3 ---Details--> ProductDetails:3"
-            },
+            ],
             traversal);
 
         Assert.Equal(7, visited.Count);
@@ -942,7 +1022,7 @@ public abstract class TrackGraphTestBase
                     TrackGraph(
                         changeTracker.Context,
                         category,
-                        node => node.Entry.State = node.Entry.Entity is Product product && product.Id == 0
+                        node => node.Entry.State = node.Entry.Entity is Product { Id: 0 }
                             ? EntityState.Added
                             : EntityState.Unchanged));
             });
@@ -974,12 +1054,12 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 77,
-            Products = new List<Product>
-            {
-                new() { Id = 77, CategoryId = expectModified ? 0 : 77 },
-                new() { Id = 0, CategoryId = expectModified ? 0 : 77 },
-                new() { Id = 78, CategoryId = expectModified ? 0 : 77 }
-            }
+            Products =
+            [
+                new Product { Id = 77, CategoryId = expectModified ? 0 : 77 },
+                new Product { Id = 0, CategoryId = expectModified ? 0 : 77 },
+                new Product { Id = 78, CategoryId = expectModified ? 0 : 77 }
+            ]
         };
 
         tracker(category, context.ChangeTracker);
@@ -1017,12 +1097,12 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 77,
-            Products = new List<Product>
-            {
-                new() { Id = 77, CategoryId = 77 },
-                new() { Id = 0, CategoryId = 77 },
-                new() { Id = 78, CategoryId = 77 }
-            }
+            Products =
+            [
+                new Product { Id = 77, CategoryId = 77 },
+                new Product { Id = 0, CategoryId = 77 },
+                new Product { Id = 78, CategoryId = 77 }
+            ]
         };
 
         context.ChangeTracker.TrackGraph(category, tracker.TrackEntity);
@@ -1047,13 +1127,8 @@ public abstract class TrackGraphTestBase
         Assert.Equal(category.Id, category.Products[2].CategoryId);
     }
 
-    private class MyTracker : KeyValueEntityTracker
+    private class MyTracker(bool updateExistingEntities) : KeyValueEntityTracker(updateExistingEntities)
     {
-        public MyTracker(bool updateExistingEntities)
-            : base(updateExistingEntities)
-        {
-        }
-
         public override EntityState DetermineState(EntityEntry entry)
         {
             if (!entry.IsKeySet)
@@ -1093,27 +1168,27 @@ public abstract class TrackGraphTestBase
         var category = new Category
         {
             Id = 1,
-            Products = new List<Product>
-            {
-                new()
+            Products =
+            [
+                new Product
                 {
                     Id = 1,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 1 }
                 },
-                new()
+                new Product
                 {
                     Id = 2,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 2 }
                 },
-                new()
+                new Product
                 {
                     Id = 3,
                     CategoryId = 1,
                     Details = new ProductDetails { Id = 3 }
                 }
-            }
+            ]
         };
 
         context.Attach(category);
@@ -1137,8 +1212,7 @@ public abstract class TrackGraphTestBase
             });
 
         Assert.Equal(
-            new List<string>
-            {
+            [
                 "<None> -----> Category:1",
                 "Category:1 ---Products--> Product:1",
                 "Product:1 ---Details--> ProductDetails:1",
@@ -1146,20 +1220,10 @@ public abstract class TrackGraphTestBase
                 "Product:2 ---Details--> ProductDetails:2",
                 "Category:1 ---Products--> Product:3",
                 "Product:3 ---Details--> ProductDetails:3"
-            },
+            ],
             traversal);
 
         Assert.Equal(7, visited.Count);
-    }
-
-    private static void AssertValuesSaved(int id, int someInt, string someString)
-    {
-        using var context = new TheShadows();
-        var entry = context.Entry(context.Set<Dark>().Single(e => EF.Property<int>(e, "Id") == id));
-
-        Assert.Equal(id, entry.Property<int>("Id").CurrentValue);
-        Assert.Equal(someInt, entry.Property<int>("SomeInt").CurrentValue);
-        Assert.Equal(someString, entry.Property<string>("SomeString").CurrentValue);
     }
 
     private class TheShadows : DbContext
@@ -1179,22 +1243,15 @@ public abstract class TrackGraphTestBase
                 .UseInMemoryDatabase(nameof(TheShadows));
     }
 
-    private class Dark
-    {
-    }
+    private class Dark;
 
     private static Product CreateSimpleGraph(int id)
         => new() { Id = id, Category = new Category { Id = id } };
 
-    private class ChangeDetectorProxy : ChangeDetector
+    private class ChangeDetectorProxy(
+        IDiagnosticsLogger<DbLoggerCategory.ChangeTracking> logger,
+        ILoggingOptions loggingOptions) : ChangeDetector(logger, loggingOptions)
     {
-        public ChangeDetectorProxy(
-            IDiagnosticsLogger<DbLoggerCategory.ChangeTracking> logger,
-            ILoggingOptions loggingOptions)
-            : base(logger, loggingOptions)
-        {
-        }
-
         public bool DetectChangesCalled { get; set; }
 
         public override void DetectChanges(InternalEntityEntry entry)
@@ -1253,9 +1310,9 @@ public abstract class TrackGraphTestBase
 
     private class ProductDetailsTagDetails
     {
-        public int Id { get; set; }
+        public int Id { get; }
 
-        public ProductDetailsTag Tag { get; set; }
+        public ProductDetailsTag Tag { get; }
     }
 
     private class Order
@@ -1264,7 +1321,7 @@ public abstract class TrackGraphTestBase
 
         // ReSharper disable once CollectionNeverUpdated.Local
         // ReSharper disable once MemberHidesStaticFromOuterClass
-        public List<OrderDetails> OrderDetails { get; set; }
+        public List<OrderDetails> OrderDetails { get; }
     }
 
     private class OrderDetails
@@ -1305,32 +1362,18 @@ public abstract class TrackGraphTestBase
         public Sweet Sweet { get; set; }
         public AreMade Are { get; set; }
         public AreMade Made { get; set; }
-        public OfThis OfThis { get; set; }
+        public OfThis OfThis { get; }
     }
 
-    private class AreMade
-    {
-    }
+    private class AreMade;
 
-    private class OfThis : AreMade
-    {
-    }
+    private class OfThis : AreMade;
 
-    private class EarlyLearningCenter : DbContext
+    private class EarlyLearningCenter(string databaseName, IServiceProvider serviceProvider) : DbContext
     {
-        private readonly string _databaseName;
-        private readonly IServiceProvider _serviceProvider;
-
         public EarlyLearningCenter(string databaseName)
+            : this(databaseName, InMemoryTestHelpers.Instance.CreateServiceProvider())
         {
-            _databaseName = databaseName;
-            _serviceProvider = InMemoryTestHelpers.Instance.CreateServiceProvider();
-        }
-
-        public EarlyLearningCenter(string databaseName, IServiceProvider serviceProvider)
-        {
-            _databaseName = databaseName;
-            _serviceProvider = serviceProvider;
         }
 
         protected internal override void OnModelCreating(ModelBuilder modelBuilder)
@@ -1399,18 +1442,13 @@ public abstract class TrackGraphTestBase
 
         protected internal override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
             => optionsBuilder
-                .UseInternalServiceProvider(_serviceProvider)
-                .UseInMemoryDatabase(_databaseName);
+                .UseInternalServiceProvider(serviceProvider)
+                .UseInMemoryDatabase(databaseName);
     }
 
-    public class KeyValueEntityTracker
+    public class KeyValueEntityTracker(bool updateExistingEntities)
     {
-        private readonly bool _updateExistingEntities;
-
-        public KeyValueEntityTracker(bool updateExistingEntities)
-        {
-            _updateExistingEntities = updateExistingEntities;
-        }
+        private readonly bool _updateExistingEntities = updateExistingEntities;
 
         public virtual void TrackEntity(EntityEntryGraphNode node)
             => node.Entry.GetInfrastructure().SetEntityState(DetermineState(node.Entry), acceptChanges: true);

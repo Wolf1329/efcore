@@ -3,6 +3,7 @@
 
 using System.ComponentModel;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Microsoft.EntityFrameworkCore.Infrastructure;
 
@@ -23,9 +24,7 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
     /// </summary>
     /// <param name="context">The context this database API belongs to.</param>
     public DatabaseFacade(DbContext context)
-    {
-        _context = context;
-    }
+        => _context = context;
 
     private IDatabaseFacadeDependencies Dependencies
         => _dependencies ??= _context.GetService<IDatabaseFacadeDependencies>();
@@ -71,6 +70,9 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
     ///     </para>
     /// </remarks>
     /// <returns><see langword="true" /> if the database is created, <see langword="false" /> if it already existed.</returns>
+    [RequiresDynamicCode(
+        "Migrations operations require building the design-time model which is not supported with NativeAOT"
+        + " Use a migration bundle or an alternate way of executing migration operations.")]
     public virtual bool EnsureCreated()
         => Dependencies.DatabaseCreator.EnsureCreated();
 
@@ -127,6 +129,9 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
     ///     <see langword="false" /> if it already existed.
     /// </returns>
     /// <exception cref="OperationCanceledException">If the <see cref="CancellationToken" /> is canceled.</exception>
+    [RequiresDynamicCode(
+        "Migrations operations require building the design-time model which is not supported with NativeAOT"
+        + " Use a migration bundle or an alternate way of executing migration operations.")]
     public virtual Task<bool> EnsureCreatedAsync(CancellationToken cancellationToken = default)
         => Dependencies.DatabaseCreator.EnsureCreatedAsync(cancellationToken);
 
@@ -152,6 +157,9 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
     ///     </para>
     /// </remarks>
     /// <returns><see langword="true" /> if the database is deleted, <see langword="false" /> if it did not exist.</returns>
+    [RequiresDynamicCode(
+        "Migrations operations require building the design-time model which is not supported with NativeAOT"
+        + " Use a migration bundle or an alternate way of executing migration operations.")]
     public virtual bool EnsureDeleted()
         => Dependencies.DatabaseCreator.EnsureDeleted();
 
@@ -189,6 +197,9 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
     ///     <see langword="false" /> if it did not exist.
     /// </returns>
     /// <exception cref="OperationCanceledException">If the <see cref="CancellationToken" /> is canceled.</exception>
+    [RequiresDynamicCode(
+        "Migrations operations require building the design-time model which is not supported with NativeAOT"
+        + " Use a migration bundle or an alternate way of executing migration operations.")]
     public virtual Task<bool> EnsureDeletedAsync(CancellationToken cancellationToken = default)
         => Dependencies.DatabaseCreator.EnsureDeletedAsync(cancellationToken);
 
@@ -376,28 +387,63 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
         => Dependencies.TransactionManager.CurrentTransaction;
 
     /// <summary>
-    ///     Gets or sets a value indicating whether or not a transaction will be created
-    ///     automatically by <see cref="DbContext.SaveChanges()" /> if none of the
-    ///     'BeginTransaction' or 'UseTransaction' methods have been called.
+    ///     Gets or sets a value indicating whether or not a transaction will be created automatically by
+    ///     <see cref="DbContext.SaveChanges()" /> if none of the 'BeginTransaction' or 'UseTransaction' methods have been called.
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         Setting this value to <see langword="false" /> will also disable the <see cref="IExecutionStrategy" />
-    ///         for <see cref="DbContext.SaveChanges()" />
+    ///         Setting this value to <see langword="false" /> will also disable the <see cref="IExecutionStrategy" /> for
+    ///         <see cref="DbContext.SaveChanges()" />
     ///     </para>
     ///     <para>
     ///         The default value is <see langword="true" />, meaning that <see cref="DbContext.SaveChanges()" /> will always use a
     ///         transaction when saving changes.
     ///     </para>
     ///     <para>
-    ///         Setting this value to <see langword="false" /> should only be done with caution since the database
-    ///         could be left in a corrupted state if <see cref="DbContext.SaveChanges()" /> fails.
+    ///         Setting this value to <see langword="false" /> should only be done with caution, since the database could be left in an
+    ///         inconsistent state if failure occurs.
     ///     </para>
     ///     <para>
     ///         See <see href="https://aka.ms/efcore-docs-transactions">Transactions in EF Core</see> for more information and examples.
     ///     </para>
     /// </remarks>
-    public virtual bool AutoTransactionsEnabled { get; set; } = true;
+    [Obsolete("Use " + nameof(AutoTransactionBehavior) + " instead")]
+    public virtual bool AutoTransactionsEnabled
+    {
+        get => AutoTransactionBehavior is AutoTransactionBehavior.Always or AutoTransactionBehavior.WhenNeeded;
+        set
+        {
+            if (value)
+            {
+                if (AutoTransactionBehavior == AutoTransactionBehavior.Never)
+                {
+                    AutoTransactionBehavior = AutoTransactionBehavior.WhenNeeded;
+                }
+            }
+            else
+            {
+                AutoTransactionBehavior = AutoTransactionBehavior.Never;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Gets or sets a value indicating whether or not a transaction will be created automatically by
+    ///     <see cref="DbContext.SaveChanges()" /> if neither 'BeginTransaction' nor 'UseTransaction' has been called.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         The default setting is <see cref="AutoTransactionBehavior.WhenNeeded" />.
+    ///     </para>
+    ///     <para>
+    ///         Setting this to <see cref="AutoTransactionBehavior.Never" /> with caution, since the database could be left in
+    ///         an inconsistent state if failure occurs.
+    ///     </para>
+    ///     <para>
+    ///         See <see href="https://aka.ms/efcore-docs-transactions">Transactions in EF Core</see> for more information and examples.
+    ///     </para>
+    /// </remarks>
+    public virtual AutoTransactionBehavior AutoTransactionBehavior { get; set; } = AutoTransactionBehavior.WhenNeeded;
 
     /// <summary>
     ///     Whether a transaction savepoint will be created automatically by <see cref="DbContext.SaveChanges()" /> if it is called
@@ -483,7 +529,7 @@ public class DatabaseFacade : IInfrastructure<IServiceProvider>, IDatabaseFacade
     /// <inheritdoc />
     void IResettableService.ResetState()
     {
-        AutoTransactionsEnabled = true;
+        AutoTransactionBehavior = AutoTransactionBehavior.WhenNeeded;
         AutoSavepointsEnabled = true;
     }
 

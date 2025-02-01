@@ -19,8 +19,8 @@ public class GuidValueGeneratorEndToEndTest
             for (var i = 0; i < 10; i++)
             {
                 guids.Add(
-                    context.Add(
-                        new Pegasus { Name = "Rainbow Dash " + i }).Entity.Id);
+                    (await context.AddAsync(
+                        new Pegasus { Name = "Rainbow Dash " + i })).Entity.Id);
                 guidsHash.Add(guids.Last());
             }
 
@@ -40,20 +40,16 @@ public class GuidValueGeneratorEndToEndTest
         }
     }
 
-    private class BronieContext : DbContext
+    private class BronieContext(IServiceProvider serviceProvider) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-
-        public BronieContext(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
             => optionsBuilder
                 .UseInMemoryDatabase(nameof(BronieContext))
                 .UseInternalServiceProvider(_serviceProvider);
 
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<Pegasus> Pegasuses { get; set; }
     }
 

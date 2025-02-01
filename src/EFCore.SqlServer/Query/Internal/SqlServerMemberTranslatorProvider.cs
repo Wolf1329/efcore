@@ -25,11 +25,12 @@ public class SqlServerMemberTranslatorProvider : RelationalMemberTranslatorProvi
         var sqlExpressionFactory = dependencies.SqlExpressionFactory;
 
         AddTranslators(
-            new IMemberTranslator[]
-            {
-                new SqlServerDateTimeMemberTranslator(sqlExpressionFactory, typeMappingSource),
-                new SqlServerStringMemberTranslator(sqlExpressionFactory),
-                new SqlServerTimeSpanMemberTranslator(sqlExpressionFactory)
-            });
+        [
+            new SqlServerDateOnlyMemberTranslator(sqlExpressionFactory),
+            new SqlServerDateTimeMemberTranslator(sqlExpressionFactory, typeMappingSource),
+            new SqlServerStringMemberTranslator(sqlExpressionFactory),
+            new SqlServerTimeSpanMemberTranslator(sqlExpressionFactory),
+            new SqlServerTimeOnlyMemberTranslator(sqlExpressionFactory)
+        ]);
     }
 }

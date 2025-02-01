@@ -1,20 +1,15 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable once CheckNamespace
+
 namespace Microsoft.EntityFrameworkCore.Query;
 
-public class QueryFilterFuncletizationContext : DbContext
+#nullable disable
+
+public class QueryFilterFuncletizationContext(DbContextOptions options) : DbContext(options)
 {
     public static int AdminId = 1;
-
-    public QueryFilterFuncletizationContext(DbContextOptions options)
-        : base(options)
-    {
-    }
-
     public bool Field;
     public bool Property { get; set; }
     public bool? IsModerated { get; set; }
@@ -75,6 +70,10 @@ public class QueryFilterFuncletizationContext : DbContext
         // Multiple context used in filter
         modelBuilder.Entity<MultiContextFilter>()
             .HasQueryFilter(e => e.IsEnabled == Property && e.BossId == new IncorrectDbContext().BossId);
+
+        modelBuilder.Entity<DeDupeFilter1>().HasQueryFilter(x => x.Tenant == Tenant);
+        modelBuilder.Entity<DeDupeFilter2>().HasQueryFilter(x => x.TenantX == Tenant);
+        modelBuilder.Entity<DeDupeFilter3>().HasQueryFilter(x => x.Tenant == Tenant);
     }
 
     private void ConfigureFilter(EntityTypeBuilder<LocalMethodFilter> builder)
@@ -94,53 +93,34 @@ public class QueryFilterFuncletizationContext : DbContext
 
     #region EntityTypeConfigs
 
-    public class FieldConfiguration : IEntityTypeConfiguration<EntityTypeConfigurationFieldFilter>
+    public class FieldConfiguration(QueryFilterFuncletizationContext context) : IEntityTypeConfiguration<EntityTypeConfigurationFieldFilter>
     {
-        public FieldConfiguration(QueryFilterFuncletizationContext context)
-        {
-            Context = context;
-        }
-
-        public QueryFilterFuncletizationContext Context { get; }
+        public QueryFilterFuncletizationContext Context { get; } = context;
 
         public void Configure(EntityTypeBuilder<EntityTypeConfigurationFieldFilter> builder)
             => builder.HasQueryFilter(e => e.IsEnabled == Context.Field);
     }
 
-    public class PropertyConfiguration : IEntityTypeConfiguration<EntityTypeConfigurationPropertyFilter>
+    public class PropertyConfiguration(QueryFilterFuncletizationContext context)
+        : IEntityTypeConfiguration<EntityTypeConfigurationPropertyFilter>
     {
-        private readonly QueryFilterFuncletizationContext _context;
-
-        public PropertyConfiguration(QueryFilterFuncletizationContext context)
-        {
-            _context = context;
-        }
+        private readonly QueryFilterFuncletizationContext _context = context;
 
         public void Configure(EntityTypeBuilder<EntityTypeConfigurationPropertyFilter> builder)
             => builder.HasQueryFilter(e => e.IsEnabled == _context.Property);
     }
 
-    public class MethodCallConfiguration : IEntityTypeConfiguration<EntityTypeConfigurationMethodCallFilter>
+    public class MethodCallConfiguration(DbContextWrapper wrapper) : IEntityTypeConfiguration<EntityTypeConfigurationMethodCallFilter>
     {
-        public MethodCallConfiguration(DbContextWrapper wrapper)
-        {
-            Wrapper = wrapper;
-        }
-
-        public DbContextWrapper Wrapper { get; }
+        public DbContextWrapper Wrapper { get; } = wrapper;
 
         public void Configure(EntityTypeBuilder<EntityTypeConfigurationMethodCallFilter> builder)
             => builder.HasQueryFilter(e => e.Tenant == Wrapper.Context.GetId());
     }
 
-    public class PropertyChainConfiguration : IEntityTypeConfiguration<EntityTypeConfigurationPropertyChainFilter>
+    public class PropertyChainConfiguration(DbContextWrapper wrapper) : IEntityTypeConfiguration<EntityTypeConfigurationPropertyChainFilter>
     {
-        private readonly DbContextWrapper _wrapper;
-
-        public PropertyChainConfiguration(DbContextWrapper wrapper)
-        {
-            _wrapper = wrapper;
-        }
+        private readonly DbContextWrapper _wrapper = wrapper;
 
         public void Configure(EntityTypeBuilder<EntityTypeConfigurationPropertyChainFilter> builder)
             => builder.HasQueryFilter(e => e.IsEnabled == _wrapper.Context.IndirectionFlag.Enabled);
@@ -148,7 +128,7 @@ public class QueryFilterFuncletizationContext : DbContext
 
     #endregion
 
-    public static void SeedData(QueryFilterFuncletizationContext context)
+    public static Task SeedDataAsync(QueryFilterFuncletizationContext context)
     {
         context.AddRange(
             new FieldFilter { IsEnabled = true },
@@ -206,23 +186,25 @@ public class QueryFilterFuncletizationContext : DbContext
             new MultiContextFilter { BossId = 1, IsEnabled = false },
             new MultiContextFilter { BossId = 1, IsEnabled = true },
             new MultiContextFilter { BossId = 2, IsEnabled = true },
-            new MultiContextFilter { BossId = 2, IsEnabled = false }
+            new MultiContextFilter { BossId = 2, IsEnabled = false },
+            new DeDupeFilter1
+            {
+                Tenant = 1,
+                DeDupeFilter2s = new List<DeDupeFilter2> { new() { TenantX = 1 }, new() { TenantX = 2 } },
+                DeDupeFilter3s = new List<DeDupeFilter3> { new() { Tenant = 1 }, new() { Tenant = 2 } }
+            },
+            new DeDupeFilter1 { Tenant = 2 }
         );
 
-        context.SaveChanges();
+        return context.SaveChangesAsync();
     }
 }
 
 #region HelperClasses
 
-public class DbContextWrapper
+public class DbContextWrapper(QueryFilterFuncletizationContext context)
 {
-    public DbContextWrapper(QueryFilterFuncletizationContext context)
-    {
-        Context = context;
-    }
-
-    public QueryFilterFuncletizationContext Context { get; }
+    public QueryFilterFuncletizationContext Context { get; } = context;
 }
 
 public static class FilterExtensions
@@ -417,6 +399,30 @@ public class MultiContextFilter
     public int Id { get; set; }
     public int BossId { get; set; }
     public bool IsEnabled { get; set; }
+}
+
+public class DeDupeFilter1
+{
+    public int Id { get; set; }
+    public int Tenant { get; set; }
+    public ICollection<DeDupeFilter2> DeDupeFilter2s { get; set; }
+    public ICollection<DeDupeFilter3> DeDupeFilter3s { get; set; }
+}
+
+public class DeDupeFilter2
+{
+    public int Id { get; set; }
+    public int TenantX { get; set; }
+    public int? DeDupeFilter1Id { get; set; }
+    public DeDupeFilter1 DeDupeFilter1 { get; set; }
+}
+
+public class DeDupeFilter3
+{
+    public int Id { get; set; }
+    public short Tenant { get; set; }
+    public int? DeDupeFilter1Id { get; set; }
+    public DeDupeFilter1 DeDupeFilter1 { get; set; }
 }
 
 #endregion

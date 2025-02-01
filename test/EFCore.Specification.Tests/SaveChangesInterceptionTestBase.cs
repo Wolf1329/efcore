@@ -1,15 +1,12 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 namespace Microsoft.EntityFrameworkCore;
 
-public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
-{
-    protected SaveChangesInterceptionTestBase(InterceptionFixtureBase fixture)
-        : base(fixture)
-    {
-    }
+#nullable disable
 
+public abstract class SaveChangesInterceptionTestBase(InterceptionTestBase.InterceptionFixtureBase fixture) : InterceptionTestBase(fixture)
+{
     [ConditionalTheory]
     [InlineData(false, false, false)]
     [InlineData(true, false, false)]
@@ -21,7 +18,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
     [InlineData(true, true, true)]
     public virtual async Task Intercept_SaveChanges_passively(bool async, bool inject, bool noAcceptChanges)
     {
-        var (context, interceptor) = CreateContext<PassiveSaveChangesInterceptor>(inject);
+        var (context, interceptor) = await CreateContextAsync<PassiveSaveChangesInterceptor>(inject);
 
         using var _ = context;
 
@@ -47,7 +44,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             exceptionFromEvent = args.Exception;
         };
 
-        context.Add(new Singularity { Id = 35, Type = "Red Dwarf" });
+        await context.AddAsync(new Singularity { Id = 35, Type = "Red Dwarf" });
 
         using var transaction = context.Database.BeginTransaction();
 
@@ -76,9 +73,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
         Assert.Equal(1, context.Set<Singularity>().AsNoTracking().Count(e => e.Id == 35));
     }
 
-    protected class PassiveSaveChangesInterceptor : SaveChangesInterceptorBase
-    {
-    }
+    protected class PassiveSaveChangesInterceptor : SaveChangesInterceptorBase;
 
     [ConditionalTheory]
     [InlineData(false, false, false)]
@@ -91,7 +86,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
     [InlineData(true, true, true)]
     public virtual async Task Intercept_SaveChanges_to_suppress_save(bool async, bool inject, bool noAcceptChanges)
     {
-        var (context, interceptor) = CreateContext<SuppressingSaveChangesInterceptor>(inject);
+        var (context, interceptor) = await CreateContextAsync<SuppressingSaveChangesInterceptor>(inject);
 
         using var _ = context;
 
@@ -117,7 +112,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             exceptionFromEvent = args.Exception;
         };
 
-        context.Add(new Singularity { Id = 35, Type = "Red Dwarf" });
+        await context.AddAsync(new Singularity { Id = 35, Type = "Red Dwarf" });
 
         using var transaction = context.Database.BeginTransaction();
 
@@ -177,7 +172,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
     [InlineData(true, true, true)]
     public virtual async Task Intercept_SaveChanges_to_change_result(bool async, bool inject, bool noAcceptChanges)
     {
-        var (context, interceptor) = CreateContext<ResultMutatingSaveChangesInterceptor>(inject);
+        var (context, interceptor) = await CreateContextAsync<ResultMutatingSaveChangesInterceptor>(inject);
 
         using var _ = context;
 
@@ -203,7 +198,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             exceptionFromEvent = args.Exception;
         };
 
-        context.Add(new Singularity { Id = 35, Type = "Red Dwarf" });
+        await context.AddAsync(new Singularity { Id = 35, Type = "Red Dwarf" });
 
         using var transaction = context.Database.BeginTransaction();
 
@@ -277,7 +272,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             return;
         }
 
-        var (context, interceptor) = CreateContext<PassiveSaveChangesInterceptor>(inject);
+        var (context, interceptor) = await CreateContextAsync<PassiveSaveChangesInterceptor>(inject);
 
         using var _ = context;
 
@@ -285,7 +280,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
 
         if (!concurrencyError)
         {
-            context.Add(new Singularity { Id = 35, Type = "Red Dwarf" });
+            await context.AddAsync(new Singularity { Id = 35, Type = "Red Dwarf" });
             var ___ = async ? await context.SaveChangesAsync() : context.SaveChanges();
             context.ChangeTracker.Clear();
         }
@@ -312,8 +307,8 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             exceptionFromEvent = args.Exception;
         };
 
-        context.Entry(new Singularity { Id = 35, Type = "Red Dwarf" }).State
-            = concurrencyError ? EntityState.Modified : EntityState.Added;
+        var entry = context.Entry(new Singularity { Id = 35, Type = "Red Dwarf" });
+        entry.State = concurrencyError ? EntityState.Modified : EntityState.Added;
 
         using var listener = Fixture.SubscribeToDiagnosticListener(context.ContextId);
 
@@ -337,7 +332,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
         Assert.Equal(async, interceptor.AsyncCalled);
         Assert.NotEqual(async, interceptor.SyncCalled);
         Assert.NotEqual(interceptor.AsyncCalled, interceptor.SyncCalled);
-        Assert.True(interceptor.FailedCalled);
+        Assert.Equal(concurrencyError, !interceptor.FailedCalled);
         Assert.Same(context, interceptor.Context);
         Assert.Same(thrown, interceptor.Exception);
 
@@ -347,6 +342,10 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
 
         if (concurrencyError)
         {
+            Assert.True(interceptor.ConcurrencyExceptionCalled);
+            Assert.Equal(1, interceptor.Entries.Count);
+            Assert.Same(entry.Entity, interceptor.Entries[0].Entity);
+
             listener.AssertEventsInOrder(
                 CoreEventId.SaveChangesStarting.Name,
                 CoreEventId.OptimisticConcurrencyException.Name);
@@ -368,18 +367,125 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
     [InlineData(true, false, true)]
     [InlineData(false, true, true)]
     [InlineData(true, true, true)]
-    public virtual async Task Intercept_connection_with_multiple_interceptors(bool async, bool inject, bool noAcceptChanges)
+    public virtual async Task Intercept_to_suppress_concurrency_exception(bool async, bool inject, bool noAcceptChanges)
+    {
+        if (!SupportsOptimisticConcurrency)
+        {
+            return;
+        }
+
+        var (context, interceptor) = await CreateContextAsync<ConcurrencySuppressingSaveChangesInterceptor>(inject);
+
+        using var _ = context;
+
+        using var transaction = context.Database.BeginTransaction();
+
+        var savingEventCalled = false;
+        var resultFromEvent = -1;
+        Exception exceptionFromEvent = null;
+
+        context.SavingChanges += (sender, args) =>
+        {
+            Assert.Same(context, sender);
+            savingEventCalled = true;
+        };
+
+        context.SavedChanges += (sender, args) =>
+        {
+            Assert.Same(context, sender);
+            resultFromEvent = args.EntitiesSavedCount;
+        };
+
+        context.SaveChangesFailed += (sender, args) =>
+        {
+            Assert.Same(context, sender);
+            exceptionFromEvent = args.Exception;
+        };
+
+        var entry = context.Entry(new Singularity { Id = 35, Type = "Red Dwarf" });
+        entry.State = EntityState.Modified;
+
+        using var listener = Fixture.SubscribeToDiagnosticListener(context.ContextId);
+
+        Exception thrown = null;
+
+        try
+        {
+            var __ = noAcceptChanges
+                ? async
+                    ? await context.SaveChangesAsync()
+                    : context.SaveChanges()
+                : async
+                    ? await context.SaveChangesAsync(acceptAllChangesOnSuccess: false)
+                    : context.SaveChanges(acceptAllChangesOnSuccess: false);
+        }
+        catch (Exception e)
+        {
+            thrown = e;
+        }
+
+        Assert.Equal(async, interceptor.AsyncCalled);
+        Assert.NotEqual(async, interceptor.SyncCalled);
+        Assert.NotEqual(interceptor.AsyncCalled, interceptor.SyncCalled);
+        Assert.False(interceptor.FailedCalled);
+        Assert.Same(context, interceptor.Context);
+        Assert.Null(thrown);
+
+        Assert.True(savingEventCalled);
+        Assert.Equal(1, resultFromEvent);
+        Assert.Null(exceptionFromEvent);
+
+        Assert.True(interceptor.ConcurrencyExceptionCalled);
+        Assert.Equal(1, interceptor.Entries.Count);
+        Assert.Same(entry.Entity, interceptor.Entries[0].Entity);
+
+        listener.AssertEventsInOrder(
+            CoreEventId.SaveChangesStarting.Name,
+            CoreEventId.OptimisticConcurrencyException.Name,
+            CoreEventId.SaveChangesCompleted.Name);
+    }
+
+    protected class ConcurrencySuppressingSaveChangesInterceptor : SaveChangesInterceptorBase
+    {
+        public override InterceptionResult ThrowingConcurrencyException(ConcurrencyExceptionEventData eventData, InterceptionResult result)
+        {
+            base.ThrowingConcurrencyException(eventData, result);
+
+            return InterceptionResult.Suppress();
+        }
+
+        public override async ValueTask<InterceptionResult> ThrowingConcurrencyExceptionAsync(
+            ConcurrencyExceptionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            await base.ThrowingConcurrencyExceptionAsync(eventData, result, cancellationToken);
+
+            return InterceptionResult.Suppress();
+        }
+    }
+
+    [ConditionalTheory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public virtual async Task Intercept_SaveChanges_with_multiple_interceptors(bool async, bool inject, bool noAcceptChanges)
     {
         var interceptor1 = new PassiveSaveChangesInterceptor();
         var interceptor2 = new ResultMutatingSaveChangesInterceptor();
         var interceptor3 = new ResultMutatingSaveChangesInterceptor();
         var interceptor4 = new PassiveSaveChangesInterceptor();
 
-        using var context = CreateContext(
+        using var context = await CreateContextAsync(
             new IInterceptor[] { new PassiveSaveChangesInterceptor(), interceptor1, interceptor2 },
             new IInterceptor[] { interceptor3, interceptor4, new PassiveSaveChangesInterceptor() });
 
-        context.Add(new Singularity { Id = 35, Type = "Red Dwarf" });
+        await context.AddAsync(new Singularity { Id = 35, Type = "Red Dwarf" });
 
         using var transaction = context.Database.BeginTransaction();
 
@@ -411,9 +517,11 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
     {
         public DbContext Context { get; set; }
         public Exception Exception { get; set; }
+        public IReadOnlyList<EntityEntry> Entries { get; set; }
         public bool AsyncCalled { get; set; }
         public bool SyncCalled { get; set; }
         public bool FailedCalled { get; set; }
+        public bool ConcurrencyExceptionCalled { get; set; }
         public bool CanceledCalled { get; set; }
         public bool SavedChangesCalled { get; set; }
         public bool SavingChangesCalled { get; set; }
@@ -471,7 +579,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             SavingChangesCalled = true;
             AsyncCalled = true;
 
-            return new ValueTask<InterceptionResult<int>>(result);
+            return ValueTask.FromResult(result);
         }
 
         public virtual ValueTask<int> SavedChangesAsync(
@@ -485,7 +593,7 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             SavedChangesCalled = true;
             AsyncCalled = true;
 
-            return new ValueTask<int>(result);
+            return ValueTask.FromResult(result);
         }
 
         public virtual Task SaveChangesFailedAsync(
@@ -514,6 +622,37 @@ public abstract class SaveChangesInterceptionTestBase : InterceptionTestBase
             AsyncCalled = true;
 
             return Task.CompletedTask;
+        }
+
+        public virtual InterceptionResult ThrowingConcurrencyException(ConcurrencyExceptionEventData eventData, InterceptionResult result)
+        {
+            Assert.NotNull(eventData.Context);
+            Assert.NotNull(eventData.Exception);
+
+            Context = eventData.Context;
+            Exception = eventData.Exception;
+            Entries = eventData.Entries;
+            ConcurrencyExceptionCalled = true;
+            SyncCalled = true;
+
+            return result;
+        }
+
+        public virtual ValueTask<InterceptionResult> ThrowingConcurrencyExceptionAsync(
+            ConcurrencyExceptionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.NotNull(eventData.Context);
+            Assert.NotNull(eventData.Exception);
+
+            Context = eventData.Context;
+            Exception = eventData.Exception;
+            Entries = eventData.Entries;
+            ConcurrencyExceptionCalled = true;
+            AsyncCalled = true;
+
+            return ValueTask.FromResult(result);
         }
     }
 

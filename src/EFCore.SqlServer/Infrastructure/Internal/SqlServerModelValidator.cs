@@ -44,8 +44,28 @@ public class SqlServerModelValidator : RelationalModelValidator
 
         ValidateDecimalColumns(model, logger);
         ValidateByteIdentityMapping(model, logger);
-        ValidateNonKeyValueGeneration(model, logger);
         ValidateTemporalTables(model, logger);
+        ValidateUseOfJsonType(model, logger);
+    }
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    protected virtual void ValidateUseOfJsonType(
+        IModel model,
+        IDiagnosticsLogger<DbLoggerCategory.Model.Validation> logger)
+    {
+        foreach (var entityType in model.GetEntityTypes())
+        {
+            if (string.Equals(entityType.GetContainerColumnType(), "json", StringComparison.OrdinalIgnoreCase)
+                || entityType.GetProperties().Any(p => string.Equals(p.GetColumnType(), "json", StringComparison.OrdinalIgnoreCase)))
+            {
+                logger.JsonTypeExperimental(entityType);
+            }
+        }
     }
 
     /// <summary>
@@ -119,23 +139,52 @@ public class SqlServerModelValidator : RelationalModelValidator
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    protected virtual void ValidateNonKeyValueGeneration(
+    protected override void ValidateValueGeneration(
+        IEntityType entityType,
+        IKey key,
+        IDiagnosticsLogger<DbLoggerCategory.Model.Validation> logger)
+    {
+        if (entityType.GetMappingStrategy() == RelationalAnnotationNames.TpcMappingStrategy
+            && entityType.BaseType == null)
+        {
+            foreach (var storeGeneratedProperty in key.Properties.Where(
+                         p => (p.ValueGenerated & ValueGenerated.OnAdd) != 0
+                             && p.GetValueGenerationStrategy() == SqlServerValueGenerationStrategy.IdentityColumn))
+            {
+                logger.TpcStoreGeneratedIdentityWarning(storeGeneratedProperty);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void ValidateTypeMappings(
         IModel model,
         IDiagnosticsLogger<DbLoggerCategory.Model.Validation> logger)
     {
+        base.ValidateTypeMappings(model, logger);
+
         foreach (var entityType in model.GetEntityTypes())
         {
-            foreach (var property in entityType.GetDeclaredProperties()
-                         .Where(
-                             p => p.GetValueGenerationStrategy() == SqlServerValueGenerationStrategy.SequenceHiLo
-                                 && ((IConventionProperty)p).GetValueGenerationStrategyConfigurationSource() != null
-                                 && !p.IsKey()
-                                 && p.ValueGenerated != ValueGenerated.Never
-                                 && (!(p.FindAnnotation(SqlServerAnnotationNames.ValueGenerationStrategy) is IConventionAnnotation strategy)
-                                     || !ConfigurationSource.Convention.Overrides(strategy.GetConfigurationSource()))))
+            foreach (var property in entityType.GetFlattenedDeclaredProperties())
             {
-                throw new InvalidOperationException(
-                    SqlServerStrings.NonKeyValueGeneration(property.Name, property.DeclaringEntityType.DisplayName()));
+                var strategy = property.GetValueGenerationStrategy();
+                var propertyType = property.ClrType;
+
+                if (strategy == SqlServerValueGenerationStrategy.IdentityColumn
+                    && !SqlServerPropertyExtensions.IsCompatibleWithValueGeneration(property))
+                {
+                    throw new InvalidOperationException(
+                        SqlServerStrings.IdentityBadType(
+                            property.Name, property.DeclaringType.DisplayName(), propertyType.ShortDisplayName()));
+                }
+
+                if (strategy is SqlServerValueGenerationStrategy.SequenceHiLo or SqlServerValueGenerationStrategy.Sequence
+                    && !SqlServerPropertyExtensions.IsCompatibleWithValueGeneration(property))
+                {
+                    throw new InvalidOperationException(
+                        SqlServerStrings.SequenceBadType(
+                            property.Name, property.DeclaringType.DisplayName(), propertyType.ShortDisplayName()));
+                }
             }
         }
     }
@@ -263,7 +312,14 @@ public class SqlServerModelValidator : RelationalModelValidator
                     temporalEntityType.DisplayName(), periodProperty.Name, nameof(DateTime)));
         }
 
-        const string expectedPeriodColumnName = "datetime2";
+        const string expectedPeriodColumnNameWithoutPrecision = "datetime2";
+        const string expectedPeriodColumnNameWithPrecision = "datetime2({0})";
+
+        var precision = periodProperty.GetPrecision();
+        var expectedPeriodColumnName = precision != null
+            ? string.Format(expectedPeriodColumnNameWithPrecision, precision.Value)
+            : expectedPeriodColumnNameWithoutPrecision;
+
         if (periodProperty.GetColumnType() != expectedPeriodColumnName)
         {
             throw new InvalidOperationException(
@@ -278,29 +334,11 @@ public class SqlServerModelValidator : RelationalModelValidator
                     temporalEntityType.DisplayName(), periodProperty.Name));
         }
 
-        if (temporalEntityType.GetTableName() is string tableName)
+        if (periodProperty.ValueGenerated != ValueGenerated.OnAddOrUpdate)
         {
-            var storeObjectIdentifier = StoreObjectIdentifier.Table(tableName, temporalEntityType.GetSchema());
-            var periodColumnName = periodProperty.GetColumnName(storeObjectIdentifier);
-
-            var propertiesMappedToPeriodColumn = temporalEntityType.GetProperties().Where(
-                p => p.Name != periodProperty.Name && p.GetColumnName(storeObjectIdentifier) == periodColumnName).ToList();
-            foreach (var propertyMappedToPeriodColumn in propertiesMappedToPeriodColumn)
-            {
-                if (propertyMappedToPeriodColumn.ValueGenerated != ValueGenerated.OnAddOrUpdate)
-                {
-                    throw new InvalidOperationException(
-                        SqlServerStrings.TemporalPropertyMappedToPeriodColumnMustBeValueGeneratedOnAddOrUpdate(
-                            temporalEntityType.DisplayName(), propertyMappedToPeriodColumn.Name, nameof(ValueGenerated.OnAddOrUpdate)));
-                }
-
-                if (propertyMappedToPeriodColumn.TryGetDefaultValue(out var _))
-                {
-                    throw new InvalidOperationException(
-                        SqlServerStrings.TemporalPropertyMappedToPeriodColumnCantHaveDefaultValue(
-                            temporalEntityType.DisplayName(), propertyMappedToPeriodColumn.Name));
-                }
-            }
+            throw new InvalidOperationException(
+                SqlServerStrings.TemporalPropertyMappedToPeriodColumnMustBeValueGeneratedOnAddOrUpdate(
+                    temporalEntityType.DisplayName(), periodProperty.Name, nameof(ValueGenerated.OnAddOrUpdate)));
         }
 
         // TODO: check that period property is excluded from query (once the annotation is added)
@@ -314,8 +352,7 @@ public class SqlServerModelValidator : RelationalModelValidator
     /// </summary>
     protected override void ValidateSharedTableCompatibility(
         IReadOnlyList<IEntityType> mappedTypes,
-        string tableName,
-        string? schema,
+        in StoreObjectIdentifier storeObject,
         IDiagnosticsLogger<DbLoggerCategory.Model.Validation> logger)
     {
         var firstMappedType = mappedTypes[0];
@@ -326,17 +363,39 @@ public class SqlServerModelValidator : RelationalModelValidator
             {
                 throw new InvalidOperationException(
                     SqlServerStrings.IncompatibleTableMemoryOptimizedMismatch(
-                        tableName, firstMappedType.DisplayName(), otherMappedType.DisplayName(),
+                        storeObject.DisplayName(), firstMappedType.DisplayName(), otherMappedType.DisplayName(),
                         isMemoryOptimized ? firstMappedType.DisplayName() : otherMappedType.DisplayName(),
                         !isMemoryOptimized ? firstMappedType.DisplayName() : otherMappedType.DisplayName()));
+            }
+        }
+
+        bool? firstSqlOutputSetting = null;
+        firstMappedType = null;
+        foreach (var mappedType in mappedTypes)
+        {
+            if (((IConventionEntityType)mappedType).GetUseSqlOutputClauseConfigurationSource() is null)
+            {
+                continue;
+            }
+
+            if (firstSqlOutputSetting is null)
+            {
+                (firstSqlOutputSetting, firstMappedType) = (mappedType.IsSqlOutputClauseUsed(), mappedType);
+            }
+            else if (mappedType.IsSqlOutputClauseUsed() != firstSqlOutputSetting)
+            {
+                throw new InvalidOperationException(
+                    SqlServerStrings.IncompatibleSqlOutputClauseMismatch(
+                        storeObject.DisplayName(), firstMappedType!.DisplayName(), mappedType.DisplayName(),
+                        firstSqlOutputSetting.Value ? firstMappedType.DisplayName() : mappedType.DisplayName(),
+                        !firstSqlOutputSetting.Value ? firstMappedType.DisplayName() : mappedType.DisplayName()));
             }
         }
 
         if (mappedTypes.Any(t => t.IsTemporal())
             && mappedTypes.Select(t => t.GetRootType()).Distinct().Count() > 1)
         {
-            // table splitting is only supported when all entites mapped to this table
-            // have consistent temporal period mappings also
+            // table splitting is only supported when all entities mapped to this table have consistent temporal period mappings also
             var expectedPeriodStartColumnName = default(string);
             var expectedPeriodEndColumnName = default(string);
 
@@ -355,9 +414,8 @@ public class SqlServerModelValidator : RelationalModelValidator
                 var periodStartProperty = mappedType.GetProperty(periodStartPropertyName!);
                 var periodEndProperty = mappedType.GetProperty(periodEndPropertyName!);
 
-                var storeObjectIdentifier = StoreObjectIdentifier.Table(tableName, mappedType.GetSchema());
-                var periodStartColumnName = periodStartProperty.GetColumnName(storeObjectIdentifier);
-                var periodEndColumnName = periodEndProperty.GetColumnName(storeObjectIdentifier);
+                var periodStartColumnName = periodStartProperty.GetColumnName(storeObject);
+                var periodEndColumnName = periodEndProperty.GetColumnName(storeObject);
 
                 if (expectedPeriodStartColumnName == null)
                 {
@@ -391,7 +449,7 @@ public class SqlServerModelValidator : RelationalModelValidator
             }
         }
 
-        base.ValidateSharedTableCompatibility(mappedTypes, tableName, schema, logger);
+        base.ValidateSharedTableCompatibility(mappedTypes, storeObject, logger);
     }
 
     /// <summary>
@@ -411,14 +469,14 @@ public class SqlServerModelValidator : RelationalModelValidator
 
         foreach (var property in mappedTypes.SelectMany(et => et.GetDeclaredProperties()))
         {
+            var columnName = property.GetColumnName(storeObject);
+            if (columnName == null)
+            {
+                continue;
+            }
+
             if (property.GetValueGenerationStrategy(storeObject) == SqlServerValueGenerationStrategy.IdentityColumn)
             {
-                var columnName = property.GetColumnName(storeObject);
-                if (columnName == null)
-                {
-                    continue;
-                }
-
                 identityColumns[columnName] = property;
             }
         }
@@ -426,7 +484,7 @@ public class SqlServerModelValidator : RelationalModelValidator
         if (identityColumns.Count > 1)
         {
             var sb = new StringBuilder()
-                .AppendJoin(identityColumns.Values.Select(p => "'" + p.DeclaringEntityType.DisplayName() + "." + p.Name + "'"));
+                .AppendJoin(identityColumns.Values.Select(p => "'" + p.DeclaringType.DisplayName() + "." + p.Name + "'"));
             throw new InvalidOperationException(SqlServerStrings.MultipleIdentityColumns(sb, storeObject.DisplayName()));
         }
     }
@@ -460,9 +518,9 @@ public class SqlServerModelValidator : RelationalModelValidator
             {
                 throw new InvalidOperationException(
                     SqlServerStrings.DuplicateColumnNameValueGenerationStrategyMismatch(
-                        duplicateProperty.DeclaringEntityType.DisplayName(),
+                        duplicateProperty.DeclaringType.DisplayName(),
                         duplicateProperty.Name,
-                        property.DeclaringEntityType.DisplayName(),
+                        property.DeclaringType.DisplayName(),
                         property.Name,
                         columnName,
                         storeObject.DisplayName()));
@@ -479,9 +537,9 @@ public class SqlServerModelValidator : RelationalModelValidator
                     {
                         throw new InvalidOperationException(
                             SqlServerStrings.DuplicateColumnIdentityIncrementMismatch(
-                                duplicateProperty.DeclaringEntityType.DisplayName(),
+                                duplicateProperty.DeclaringType.DisplayName(),
                                 duplicateProperty.Name,
-                                property.DeclaringEntityType.DisplayName(),
+                                property.DeclaringType.DisplayName(),
                                 property.Name,
                                 columnName,
                                 storeObject.DisplayName()));
@@ -493,9 +551,9 @@ public class SqlServerModelValidator : RelationalModelValidator
                     {
                         throw new InvalidOperationException(
                             SqlServerStrings.DuplicateColumnIdentitySeedMismatch(
-                                duplicateProperty.DeclaringEntityType.DisplayName(),
+                                duplicateProperty.DeclaringType.DisplayName(),
                                 duplicateProperty.Name,
-                                property.DeclaringEntityType.DisplayName(),
+                                property.DeclaringType.DisplayName(),
                                 property.Name,
                                 columnName,
                                 storeObject.DisplayName()));
@@ -508,9 +566,9 @@ public class SqlServerModelValidator : RelationalModelValidator
                     {
                         throw new InvalidOperationException(
                             SqlServerStrings.DuplicateColumnSequenceMismatch(
-                                duplicateProperty.DeclaringEntityType.DisplayName(),
+                                duplicateProperty.DeclaringType.DisplayName(),
                                 duplicateProperty.Name,
-                                property.DeclaringEntityType.DisplayName(),
+                                property.DeclaringType.DisplayName(),
                                 property.Name,
                                 columnName,
                                 storeObject.DisplayName()));
@@ -524,9 +582,9 @@ public class SqlServerModelValidator : RelationalModelValidator
         {
             throw new InvalidOperationException(
                 SqlServerStrings.DuplicateColumnSparsenessMismatch(
-                    duplicateProperty.DeclaringEntityType.DisplayName(),
+                    duplicateProperty.DeclaringType.DisplayName(),
                     duplicateProperty.Name,
-                    property.DeclaringEntityType.DisplayName(),
+                    property.DeclaringType.DisplayName(),
                     property.Name,
                     columnName,
                     storeObject.DisplayName()));

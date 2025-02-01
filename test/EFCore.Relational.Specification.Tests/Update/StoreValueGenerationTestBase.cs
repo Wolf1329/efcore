@@ -5,20 +5,11 @@ using Microsoft.EntityFrameworkCore.TestModels.StoreValueGenerationModel;
 
 namespace Microsoft.EntityFrameworkCore.Update;
 
-#nullable enable
+#nullable disable
 
-public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFixture>
+public abstract class StoreValueGenerationTestBase<TFixture>(TFixture fixture) : IClassFixture<TFixture>, IAsyncLifetime
     where TFixture : StoreValueGenerationFixtureBase
 {
-    protected StoreValueGenerationTestBase(TFixture fixture)
-    {
-        Fixture = fixture;
-
-        fixture.Reseed();
-
-        ClearLog();
-    }
-
     #region Single operation
 
     [ConditionalTheory]
@@ -53,7 +44,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
 
     #endregion Single operation
 
-    #region Two operations with same entity type
+    #region Same two operations with same entity type
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -85,9 +76,9 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
     public virtual Task Delete_Delete_with_same_entity_type(bool async)
         => Test(EntityState.Deleted, EntityState.Deleted, GeneratedValues.Some, async, withSameEntityType: true);
 
-    #endregion Two operations with same entity type
+    #endregion Same two operations with same entity type
 
-    #region Two operations with different entity types
+    #region Same two operations with different entity types
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -119,7 +110,16 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
     public virtual Task Delete_Delete_with_different_entity_types(bool async)
         => Test(EntityState.Deleted, EntityState.Deleted, GeneratedValues.Some, async, withSameEntityType: false);
 
-    #endregion Two operations with different entity types
+    #endregion Same two operations with different entity types
+
+    #region Different two operations
+
+    [ConditionalTheory]
+    [MemberData(nameof(IsAsyncData))]
+    public virtual Task Delete_Add_with_same_entity_types(bool async)
+        => Test(EntityState.Deleted, EntityState.Added, GeneratedValues.Some, async, withSameEntityType: true);
+
+    #endregion Different two operations
 
     protected virtual async Task Test(
         EntityState firstOperationType,
@@ -152,7 +152,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
             };
 
         StoreValueGenerationData first;
-        StoreValueGenerationData? second;
+        StoreValueGenerationData second;
 
         switch (firstOperationType)
         {
@@ -164,7 +164,12 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                         firstDbSet.Add(first);
                         break;
                     case GeneratedValues.None:
-                        first = new StoreValueGenerationData { Id = 100, Data1 = 1000, Data2 = 1000 };
+                        first = new StoreValueGenerationData
+                        {
+                            Id = 100,
+                            Data1 = 1000,
+                            Data2 = 1000
+                        };
                         firstDbSet.Add(first);
                         break;
                     case GeneratedValues.All:
@@ -174,6 +179,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                     default:
                         throw new ArgumentOutOfRangeException(nameof(generatedValues));
                 }
+
                 break;
 
             case EntityState.Modified:
@@ -190,6 +196,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                     default:
                         throw new ArgumentOutOfRangeException(nameof(generatedValues));
                 }
+
                 break;
 
             case EntityState.Deleted:
@@ -206,6 +213,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                     default:
                         throw new ArgumentOutOfRangeException(nameof(generatedValues));
                 }
+
                 break;
 
             default:
@@ -222,7 +230,12 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                         secondDbSet!.Add(second);
                         break;
                     case GeneratedValues.None:
-                        second = new StoreValueGenerationData { Id = 101, Data1 = 1001, Data2 = 1001 };
+                        second = new StoreValueGenerationData
+                        {
+                            Id = 101,
+                            Data1 = 1001,
+                            Data2 = 1001
+                        };
                         secondDbSet!.Add(second);
                         break;
                     case GeneratedValues.All:
@@ -232,6 +245,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                     default:
                         throw new ArgumentOutOfRangeException(nameof(generatedValues));
                 }
+
                 break;
 
             case EntityState.Modified:
@@ -248,6 +262,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                     default:
                         throw new ArgumentOutOfRangeException(nameof(generatedValues));
                 }
+
                 break;
 
             case EntityState.Deleted:
@@ -264,6 +279,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
                     default:
                         throw new ArgumentOutOfRangeException(nameof(generatedValues));
                 }
+
                 break;
 
             case null:
@@ -321,7 +337,7 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
     }
 
     /// <summary>
-    ///     Providers can override this to specify when <see cref="DbContext.SaveChanges()"/> should create a transaction, and when not.
+    ///     Providers can override this to specify when <see cref="DbContext.SaveChanges()" /> should create a transaction, and when not.
     ///     By default, it's assumed that multiple updates always require a transaction, whereas a single update never does.
     /// </summary>
     protected virtual bool ShouldCreateImplicitTransaction(
@@ -342,12 +358,12 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
         bool withSameEntityType)
         => 1;
 
-    protected TFixture Fixture { get; }
+    protected TFixture Fixture { get; } = fixture;
 
     protected StoreValueGenerationContext CreateContext()
         => Fixture.CreateContext();
 
-    public static IEnumerable<object[]> IsAsyncData = new[] { new object[] { false }, new object[] { true } };
+    public static IEnumerable<object[]> IsAsyncData = new object[][] { [false], [true] };
 
     protected virtual void AssertSql(params string[] expected)
         => Fixture.TestSqlLoggerFactory.AssertBaseline(expected);
@@ -361,4 +377,15 @@ public abstract class StoreValueGenerationTestBase<TFixture> : IClassFixture<TFi
         None,
         All
     }
+
+    public async Task InitializeAsync()
+    {
+        Fixture.CleanData();
+        await Fixture.SeedAsync();
+
+        ClearLog();
+    }
+
+    public Task DisposeAsync()
+        => Task.CompletedTask;
 }

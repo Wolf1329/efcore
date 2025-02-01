@@ -3,14 +3,11 @@
 
 namespace Microsoft.EntityFrameworkCore;
 
-public abstract class GraphUpdatesSqliteTestBase<TFixture> : GraphUpdatesTestBase<TFixture>
+#nullable disable
+
+public abstract class GraphUpdatesSqliteTestBase<TFixture>(TFixture fixture) : GraphUpdatesTestBase<TFixture>(fixture)
     where TFixture : GraphUpdatesSqliteTestBase<TFixture>.GraphUpdatesSqliteFixtureBase, new()
 {
-    protected GraphUpdatesSqliteTestBase(TFixture fixture)
-        : base(fixture)
-    {
-    }
-
     [ConditionalTheory(Skip = "Default owned collection pattern does not work with SQLite due to composite key.")]
     public override Task Update_principal_with_shadow_key_owned_collection_throws(bool async)
         => Task.CompletedTask;
@@ -49,7 +46,10 @@ public abstract class GraphUpdatesSqliteTestBase<TFixture> : GraphUpdatesTestBas
         protected override ITestStoreFactory TestStoreFactory
             => SqliteTestStoreFactory.Instance;
 
-        protected virtual bool AutoDetectChanges
+        public override DbContextOptionsBuilder AddOptions(DbContextOptionsBuilder builder)
+            => base.AddOptions(builder.ConfigureWarnings(b => b.Ignore(SqliteEventId.CompositeKeyWithValueGeneration)));
+
+        public override bool AutoDetectChanges
             => false;
 
         public override PoolableDbContext CreateContext()
@@ -64,6 +64,31 @@ public abstract class GraphUpdatesSqliteTestBase<TFixture> : GraphUpdatesTestBas
         {
             base.OnModelCreating(modelBuilder, context);
 
+            modelBuilder.Entity<OwnerRoot>(
+                b =>
+                {
+                    b.OwnsMany(
+                        e => e.OptionalChildren, b =>
+                        {
+                            b.HasKey("Id");
+                            b.OwnsMany(
+                                e => e.Children, b =>
+                                {
+                                    b.HasKey("Id");
+                                });
+                        });
+                    b.OwnsMany(
+                        e => e.RequiredChildren, b =>
+                        {
+                            b.HasKey("Id");
+                            b.OwnsMany(
+                                e => e.Children, b =>
+                                {
+                                    b.HasKey("Id");
+                                });
+                        });
+                });
+
             modelBuilder.Entity<AccessState>(
                 b =>
                 {
@@ -76,6 +101,41 @@ public abstract class GraphUpdatesSqliteTestBase<TFixture> : GraphUpdatesTestBas
                 {
                     b.Property(e => e.IdUserState).HasDefaultValue(1);
                     b.HasOne(e => e.UserState).WithMany(e => e.Users).HasForeignKey(e => e.IdUserState);
+                });
+
+            modelBuilder.Entity<AccessStateWithSentinel>(
+                b =>
+                {
+                    b.Property(e => e.AccessStateWithSentinelId).ValueGeneratedNever();
+                    b.HasData(new AccessStateWithSentinel { AccessStateWithSentinelId = 1 });
+                });
+
+            modelBuilder.Entity<CruiserWithSentinel>(
+                b =>
+                {
+                    b.Property(e => e.IdUserState).HasDefaultValue(1).HasSentinel(667);
+                    b.HasOne(e => e.UserState).WithMany(e => e.Users).HasForeignKey(e => e.IdUserState);
+                });
+
+            modelBuilder.Entity<SomethingOfCategoryA>().Property<int>("CategoryId").HasDefaultValue(1);
+            modelBuilder.Entity<SomethingOfCategoryB>().Property(e => e.CategoryId).HasDefaultValue(2);
+
+            modelBuilder.Entity<CompositeKeyWith<int>>(
+                b =>
+                {
+                    b.Property(e => e.PrimaryGroup).HasDefaultValue(1).HasSentinel(1);
+                });
+
+            modelBuilder.Entity<CompositeKeyWith<bool>>(
+                b =>
+                {
+                    b.Property(e => e.PrimaryGroup).HasDefaultValue(true);
+                });
+
+            modelBuilder.Entity<CompositeKeyWith<bool?>>(
+                b =>
+                {
+                    b.Property(e => e.PrimaryGroup).HasDefaultValue(true);
                 });
         }
     }

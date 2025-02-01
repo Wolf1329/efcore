@@ -1,8 +1,6 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
-
 namespace Microsoft.EntityFrameworkCore.SqlServer.Query.Internal;
 
 /// <summary>
@@ -21,8 +19,8 @@ public class SqlServerParameterBasedSqlProcessor : RelationalParameterBasedSqlPr
     /// </summary>
     public SqlServerParameterBasedSqlProcessor(
         RelationalParameterBasedSqlProcessorDependencies dependencies,
-        bool useRelationalNulls)
-        : base(dependencies, useRelationalNulls)
+        RelationalParameterBasedSqlProcessorParameters parameters)
+        : base(dependencies, parameters)
     {
     }
 
@@ -32,19 +30,31 @@ public class SqlServerParameterBasedSqlProcessor : RelationalParameterBasedSqlPr
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    public override SelectExpression Optimize(
-        SelectExpression selectExpression,
+    public override Expression Optimize(
+        Expression queryExpression,
         IReadOnlyDictionary<string, object?> parametersValues,
         out bool canCache)
     {
-        var optimizedSelectExpression = base.Optimize(selectExpression, parametersValues, out canCache);
+        var optimizedQueryExpression = new SkipTakeCollapsingExpressionVisitor(Dependencies.SqlExpressionFactory)
+            .Process(queryExpression, parametersValues, out var canCache2);
 
-        optimizedSelectExpression = new SkipTakeCollapsingExpressionVisitor(Dependencies.SqlExpressionFactory)
-            .Process(optimizedSelectExpression, parametersValues, out var canCache2);
+        optimizedQueryExpression = base.Optimize(optimizedQueryExpression, parametersValues, out canCache);
 
         canCache &= canCache2;
 
-        return (SelectExpression)new SearchConditionConvertingExpressionVisitor(Dependencies.SqlExpressionFactory)
-            .Visit(optimizedSelectExpression);
+        return new SearchConditionConverter(Dependencies.SqlExpressionFactory).Visit(optimizedQueryExpression);
+    }
+
+    /// <inheritdoc />
+    protected override Expression ProcessSqlNullability(
+        Expression selectExpression,
+        IReadOnlyDictionary<string, object?> parametersValues,
+        out bool canCache)
+    {
+        Check.NotNull(selectExpression, nameof(selectExpression));
+        Check.NotNull(parametersValues, nameof(parametersValues));
+
+        return new SqlServerSqlNullabilityProcessor(Dependencies, Parameters).Process(
+            selectExpression, parametersValues, out canCache);
     }
 }

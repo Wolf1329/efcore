@@ -47,11 +47,12 @@ public static class DbContextActivator
                 new OperationReporter(reportHandler),
                 contextType.Assembly,
                 startupAssembly ?? contextType.Assembly,
+                project: "",
                 projectDir: "",
                 rootNamespace: null,
                 language: "C#",
                 nullable: false,
-                args: args ?? Array.Empty<string>())
+                args: args ?? [])
             .CreateContext(contextType.FullName!);
     }
 }

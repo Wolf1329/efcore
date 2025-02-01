@@ -5,11 +5,28 @@ using Microsoft.EntityFrameworkCore.TestModels.TransportationModel;
 
 namespace Microsoft.EntityFrameworkCore;
 
-public class TableSplittingSqliteTest : TableSplittingTestBase
+#nullable disable
+
+public class TableSplittingSqliteTest(ITestOutputHelper testOutputHelper) : TableSplittingTestBase(testOutputHelper)
 {
-    public TableSplittingSqliteTest(ITestOutputHelper testOutputHelper)
-        : base(testOutputHelper)
+    public override async Task ExecuteUpdate_works_for_table_sharing(bool async)
     {
+        await base.ExecuteUpdate_works_for_table_sharing(async);
+
+        AssertSql(
+            """
+@p='1'
+
+UPDATE "Vehicles" AS "v"
+SET "SeatingCapacity" = @p
+""",
+            //
+            """
+SELECT NOT EXISTS (
+    SELECT 1
+    FROM "Vehicles" AS "v"
+    WHERE "v"."SeatingCapacity" <> 1)
+""");
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

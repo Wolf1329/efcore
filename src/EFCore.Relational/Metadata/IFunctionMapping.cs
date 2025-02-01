@@ -46,7 +46,7 @@ public interface IFunctionMapping : ITableMappingBase
     /// <param name="options">Options for generating the string.</param>
     /// <param name="indent">The number of indent spaces to use before each new line.</param>
     /// <returns>A human-readable representation.</returns>
-    string ToDebugString(MetadataDebugStringOptions options = MetadataDebugStringOptions.ShortDefault, int indent = 0)
+    string ITableMappingBase.ToDebugString(MetadataDebugStringOptions options, int indent)
     {
         var builder = new StringBuilder();
         var indentString = new string(' ', indent);
@@ -59,18 +59,24 @@ public interface IFunctionMapping : ITableMappingBase
             builder.Append("FunctionMapping: ");
         }
 
-        builder.Append(EntityType.Name).Append(" - ");
+        builder.Append(TypeBase.DisplayName()).Append(" - ");
 
-        builder.Append(Table.Name);
+        builder.Append(StoreFunction.Name);
 
         if (IsDefaultFunctionMapping)
         {
             builder.Append(" DefaultMapping");
         }
 
-        if (IncludesDerivedTypes)
+        if (IncludesDerivedTypes != null)
         {
-            builder.Append(" IncludesDerivedTypes");
+            builder.Append(' ');
+            if (!IncludesDerivedTypes.Value)
+            {
+                builder.Append('!');
+            }
+
+            builder.Append("IncludesDerivedTypes");
         }
 
         if (!singleLine && (options & MetadataDebugStringOptions.IncludeAnnotations) != 0)

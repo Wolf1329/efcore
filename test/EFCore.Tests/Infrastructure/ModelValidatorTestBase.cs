@@ -85,28 +85,66 @@ public abstract class ModelValidatorTestBase
         public ICollection<A> ManyAs { get; set; }
     }
 
-    protected class C : A
+    protected class C : A;
+
+    protected class D : A;
+
+    protected class F : D;
+
+    protected class G
     {
+        public int Id { get; set; }
+
+        public int? P0 { get; set; }
+        public int? P1 { get; set; }
+        public int? P2 { get; set; }
+        public int? P3 { get; set; }
+
+        public A A { get; set; }
     }
 
-    protected class D : A
-    {
-    }
-
-    protected class F : D
-    {
-    }
-
-    protected abstract class Abstract : A
-    {
-    }
+    protected abstract class Abstract : A;
 
     // ReSharper disable once UnusedTypeParameter
-    protected class Generic<T> : Abstract
+    protected class Generic<T> : Abstract;
+
+#nullable enable
+    protected class BaseEntity
+    {
+        public int Id { get; set; }
+    }
+
+    protected class ChildA : BaseEntity
+    {
+        public OwnedType OwnedType { get; set; } = null!;
+    }
+
+    protected class ChildB : BaseEntity
     {
     }
 
-    public class SampleEntity
+    protected class ChildC : BaseEntity
+    {
+    }
+
+    protected class ChildD : BaseEntity
+    {
+    }
+
+    [Owned]
+    protected class OwnedType
+    {
+        public NestedOwnedType NestedOwnedType { get; set; } = null!;
+    }
+
+    [Owned]
+    protected class NestedOwnedType
+    {
+    }
+
+#nullable restore
+
+    protected class SampleEntity
     {
         public int Id { get; set; }
         public int Number { get; set; }
@@ -119,29 +157,27 @@ public abstract class ModelValidatorTestBase
         public ICollection<SampleEntity> OtherSamples { get; set; }
     }
 
-    public class AnotherSampleEntity
+    protected class AnotherSampleEntity
     {
         public int Id { get; set; }
         public ReferencedEntity ReferencedEntity { get; set; }
     }
 
-    public class ReferencedEntity
+    protected class ReferencedEntity
     {
         public int Id { get; set; }
         public int SampleEntityId { get; set; }
     }
 
-    public class SampleEntityMinimal
+    protected class SampleEntityMinimal
     {
         public int Id { get; set; }
         public ReferencedEntityMinimal ReferencedEntity { get; set; }
     }
 
-    public class ReferencedEntityMinimal
-    {
-    }
+    protected class ReferencedEntityMinimal;
 
-    public class AnotherSampleEntityMinimal
+    protected class AnotherSampleEntityMinimal
     {
         public int Id { get; set; }
         public ReferencedEntityMinimal ReferencedEntity { get; set; }
@@ -153,6 +189,46 @@ public abstract class ModelValidatorTestBase
         public bool ImBool { get; set; }
         public bool ImNotUsed { get; set; }
         public bool? ImNot { get; set; }
+    }
+
+    protected class E2
+    {
+        private bool? _imBool;
+
+        public int Id { get; set; }
+
+        public bool ImBool
+        {
+            get => _imBool ?? true;
+            set => _imBool = value;
+        }
+    }
+
+    protected enum X
+    {
+        A = 1,
+        B
+    }
+
+    protected class WithEnum
+    {
+        public int Id { get; set; }
+        public X EnumWithDefaultConstraint { get; set; }
+        public X EnumNoDefaultConstraint { get; set; }
+        public X? NullableEnum { get; set; }
+    }
+
+    protected class WithEnum2
+    {
+        private X? _enumWithDefaultConstraint;
+
+        public int Id { get; set; }
+
+        public X EnumWithDefaultConstraint
+        {
+            get => _enumWithDefaultConstraint ?? X.B;
+            set => _enumWithDefaultConstraint = value;
+        }
     }
 
     protected class EntityWithInvalidProperties
@@ -189,8 +265,17 @@ public abstract class ModelValidatorTestBase
 
     protected class Customer
     {
+        private string _name;
+        public string OtherName;
+
         public int Id { get; set; }
-        public string Name { get; set; }
+
+        public string Name
+        {
+            get => _name;
+            set => _name = value;
+        }
+
         public string PartitionId { get; set; }
         public ICollection<Order> Orders { get; set; }
     }
@@ -312,10 +397,46 @@ public abstract class ModelValidatorTestBase
         public PrincipalFour PrincipalFour { get; set; }
     }
 
-    protected ModelValidatorTestBase()
+    protected class Blog
     {
-        LoggerFactory = new ListLoggerFactory(l => l == DbLoggerCategory.Model.Validation.Name || l == DbLoggerCategory.Model.Name);
+        public int BlogId { get; set; }
+        public bool IsDeleted { get; set; }
+        public ICollection<PicturePost> PicturePosts { get; set; }
+        public List<BlogOwnedEntity> BlogOwnedEntities { get; set; }
     }
+
+    protected class BlogOwnedEntity
+    {
+        public int BlogOwnedEntityId { get; set; }
+        public int BlogId { get; set; }
+        public Blog Blog { get; set; }
+    }
+
+    protected class Post
+    {
+        public int PostId { get; set; }
+        public int BlogId { get; set; }
+        public string Content { get; set; }
+        public bool IsDeleted { get; set; }
+        public Blog Blog { get; set; }
+    }
+
+    protected class PicturePost : Post
+    {
+        public string PictureUrl { get; set; }
+        public List<Picture> Pictures { get; set; }
+    }
+
+    protected class Picture
+    {
+        public int PictureId { get; set; }
+        public bool IsDeleted { get; set; }
+        public int PicturePostId { get; set; }
+        public PicturePost PicturePost { get; set; }
+    }
+
+    protected ModelValidatorTestBase()
+        => LoggerFactory = new ListLoggerFactory(l => l == DbLoggerCategory.Model.Validation.Name || l == DbLoggerCategory.Model.Name);
 
     protected ListLoggerFactory LoggerFactory { get; }
 
@@ -391,7 +512,7 @@ public abstract class ModelValidatorTestBase
             new NullDbContextLogger());
     }
 
-    protected virtual TestHelpers.TestModelBuilder CreateConventionalModelBuilder(
+    protected virtual TestHelpers.TestModelBuilder CreateConventionModelBuilder(
         Action<ModelConfigurationBuilder> configure = null,
         bool sensitiveDataLoggingEnabled = false)
         => TestHelpers.CreateConventionBuilder(

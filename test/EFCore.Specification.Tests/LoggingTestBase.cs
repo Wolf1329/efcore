@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore.Diagnostics.Internal;
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore;
 
+#nullable disable
+
 public abstract class LoggingTestBase
 {
     [ConditionalFact]
@@ -32,6 +34,50 @@ public abstract class LoggingTestBase
             ProviderVersion,
             optionsFragment ?? "None").Trim();
 
+    [ConditionalFact]
+    public virtual void InvalidIncludePathError_throws_by_default()
+    {
+        using var context = new InvalidIncludePathErrorContext(CreateOptionsBuilder(new ServiceCollection()));
+
+        Assert.Equal(
+            CoreStrings.WarningAsErrorTemplate(
+                CoreEventId.InvalidIncludePathError.ToString(),
+                CoreResources.LogInvalidIncludePath(CreateTestLogger())
+                    .GenerateMessage("Wheels", "Wheels"),
+                "CoreEventId.InvalidIncludePathError"),
+            Assert.Throws<InvalidOperationException>(
+                () => context.Set<Animal>().Include("Wheels").Load()).Message);
+    }
+
+    protected class InvalidIncludePathErrorContext(DbContextOptionsBuilder optionsBuilder) : DbContext(optionsBuilder.Options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.Entity<Animal>();
+    }
+
+    protected class Animal
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public Person FavoritePerson { get; set; }
+    }
+
+    protected class Cat : Animal
+    {
+        public string Breed { get; set; }
+        public string Type { get; set; }
+        public int Identity { get; set; }
+    }
+
+    protected class Person
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public string FavoriteBreed { get; set; }
+    }
+
+    protected abstract TestLogger CreateTestLogger();
+
     protected abstract DbContextOptionsBuilder CreateOptionsBuilder(IServiceCollection services);
 
     protected abstract string ProviderName { get; }
@@ -54,11 +100,5 @@ public abstract class LoggingTestBase
         return loggerFactory.Log.Single(t => t.Id.Id == CoreEventId.ContextInitialized.Id).Message;
     }
 
-    protected class LoggingContext : DbContext
-    {
-        public LoggingContext(DbContextOptionsBuilder optionsBuilder)
-            : base(optionsBuilder.Options)
-        {
-        }
-    }
+    protected class LoggingContext(DbContextOptionsBuilder optionsBuilder) : DbContext(optionsBuilder.Options);
 }

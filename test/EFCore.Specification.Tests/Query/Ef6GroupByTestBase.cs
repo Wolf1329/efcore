@@ -3,14 +3,11 @@
 
 namespace Microsoft.EntityFrameworkCore.Query;
 
-public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
+#nullable disable
+
+public abstract class Ef6GroupByTestBase<TFixture>(TFixture fixture) : QueryTestBase<TFixture>(fixture)
     where TFixture : Ef6GroupByTestBase<TFixture>.Ef6GroupByFixtureBase, new()
 {
-    protected Ef6GroupByTestBase(TFixture fixture)
-        : base(fixture)
-    {
-    }
-
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task GroupBy_is_optimized_when_projecting_group_key(bool async)
@@ -77,7 +74,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
-    public virtual Task GroupBy_is_optimized_when_filerting_and_projecting_anonymous_type_with_group_key_and_function_aggregate(
+    public virtual Task GroupBy_is_optimized_when_filtering_and_projecting_anonymous_type_with_group_key_and_function_aggregate(
         bool async)
         => AssertQuery(
             async,
@@ -109,11 +106,17 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_doesnt_produce_a_groupby_statement(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => ss.Set<ArubaOwner>().GroupBy(o => o).Select(g => g.Key)));
+        => AssertQuery(
+            async,
+            ss => ss.Set<ArubaOwner>().GroupBy(o => o).Select(g => g.Key),
+            elementSorter: e => e.Id,
+            elementAsserter: (e, a) =>
+            {
+                Assert.Equal(e.Id, a.Id);
+                Assert.Equal(e.Alias, a.Alias);
+                Assert.Equal(e.FirstName, a.FirstName);
+                Assert.Equal(e.LastName, a.LastName);
+            });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -132,111 +135,93 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_2(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQueryScalar(
-                async,
-                ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => new { c.LastName, c.FirstName }, (k, g) => g.Count())));
+        => AssertQueryScalar(
+            async,
+            ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => new { c.LastName, c.FirstName }, (k, g) => g.Count()));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_3(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQueryScalar(
-                async,
-                ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => c, (k, g) => g.Count())));
+        => AssertQueryScalar(
+            async,
+            ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => c, (k, g) => g.Count()));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_4(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => c, (k, g) => new { Count = g.Count() })));
+        => AssertQuery(
+            async,
+            ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => c, (k, g) => new { Count = g.Count() }));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_5(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => c, (k, g) => new { k.Id, Count = g.Count() })));
+        => AssertQuery(
+            async,
+            ss => ss.Set<ArubaOwner>().GroupBy(o => o, c => c, (k, g) => new { k.Id, Count = g.Count() }));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_6(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => ss.Set<ArubaOwner>().GroupBy(
-                    o => o, c => c, (k, g) => new
-                    {
-                        k.Id,
-                        k.Alias,
-                        Count = g.Count()
-                    })));
+        => AssertQuery(
+            async,
+            ss => ss.Set<ArubaOwner>().GroupBy(
+                o => o, c => c, (k, g) => new
+                {
+                    k.Id,
+                    k.Alias,
+                    Count = g.Count()
+                }));
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_7(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQueryScalar(
-                async,
-                ss => from o in ss.Set<ArubaOwner>()
-                      group o by o
-                      into g
-                      select g.Count()));
+        => AssertQueryScalar(
+            async,
+            ss => from o in ss.Set<ArubaOwner>()
+                  group o by o
+                  into g
+                  select g.Count());
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_8(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => from o in ss.Set<ArubaOwner>()
-                      group o by o
-                      into g
-                      select new { g.Key.Id, Count = g.Count() }));
+        => AssertQuery(
+            async,
+            ss => from o in ss.Set<ArubaOwner>()
+                  group o by o
+                  into g
+                  select new { g.Key.Id, Count = g.Count() });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_9(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => from o in ss.Set<ArubaOwner>()
-                      group o by o
-                      into g
-                      select new
-                      {
-                          g.Key.Id,
-                          g.Key.Alias,
-                          Count = g.Count()
-                      }));
+        => AssertQuery(
+            async,
+            ss => from o in ss.Set<ArubaOwner>()
+                  group o by o
+                  into g
+                  select new
+                  {
+                      g.Key.Id,
+                      g.Key.Alias,
+                      Count = g.Count()
+                  });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Grouping_by_all_columns_with_aggregate_function_works_10(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => from o in ss.Set<ArubaOwner>()
-                      group o by o
-                      into g
-                      select new
-                      {
-                          g.Key.Id,
-                          Sum = g.Sum(x => x.Id),
-                          Count = g.Count()
-                      }));
+        => AssertQuery(
+            async,
+            ss => from o in ss.Set<ArubaOwner>()
+                  group o by o
+                  into g
+                  select new
+                  {
+                      g.Key.Id,
+                      Sum = g.Sum(x => x.Id),
+                      Count = g.Count()
+                  });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -410,22 +395,27 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                   group p by p.Category
                   into g
                   select new { Category = g.Key, AveragePrice = g.Average(p => p.UnitPrice) },
-            ss => from p in ss.Set<ProductForLinq>()
-                  group p by p.Category
-                  into g
-                  select new { Category = g.Key, AveragePrice = Math.Round(g.Average(p => p.UnitPrice) - 0.0000005m, 6) },
-            elementSorter: e => (e.Category, e.AveragePrice));
+            elementSorter: e => (e.Category, e.AveragePrice),
+            elementAsserter: (e, a) =>
+            {
+                AssertEqual(e.Category, a.Category);
+                Assert.Equal(e.AveragePrice, a.AveragePrice, 5);
+            });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Group_Join_from_LINQ_101(bool async)
-        // GroupJoin final operator. Issue #19930.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => from c in ss.Set<CustomerForLinq>()
-                      join o in ss.Set<OrderForLinq>() on c equals o.Customer into ps
-                      select new { Customer = c, Products = ps }));
+        => AssertQuery(
+            async,
+            ss => from c in ss.Set<CustomerForLinq>()
+                  join o in ss.Set<OrderForLinq>() on c equals o.Customer into ps
+                  select new { Customer = c, Products = ps },
+            elementSorter: e => e.Customer.Id,
+            elementAsserter: (e, a) =>
+            {
+                AssertEqual(e.Customer, a.Customer);
+                AssertCollection(e.Products, a.Products);
+            });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -447,8 +437,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                 Assert.Equal(l.Customer.Id, r.Customer.Id);
                 Assert.Equal(l.Customer.Region, r.Customer.Region);
                 Assert.Equal(l.Customer.CompanyName, r.Customer.CompanyName);
-            },
-            entryCount: 4);
+            });
 
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
@@ -468,8 +457,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
             {
                 Assert.Equal(l.OrderId, r.OrderId);
                 AssertEqual(l.Customer, r.Customer);
-            },
-            entryCount: 11);
+            });
 
     [ConditionalTheory] // From #12088
     [MemberData(nameof(IsAsyncData))]
@@ -482,8 +470,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                 .Select(
                     g => g.OrderBy(e => e.FirstName)
                         .ThenBy(e => e.LastName)
-                        .FirstOrDefault()),
-            entryCount: 9);
+                        .FirstOrDefault()));
 
     [ConditionalTheory] // From #16648
     [MemberData(nameof(IsAsyncData))]
@@ -644,7 +631,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                 Assert.Equal(l.Id, r.Id);
                 Assert.Equal(l.Age, r.Age);
                 Assert.Equal(l.Style, r.Style);
-                Assert.Equal(l.Values, r.Values);
+                AssertCollection(l.Values, r.Values, elementSorter: e => (e.Id, e.Style, e.Age));
             });
 
     [ConditionalTheory] // From #19506
@@ -680,8 +667,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                     AssertEqual(lTake[i], rTake[i]);
                 }
             },
-            assertOrder: false,
-            entryCount: 8);
+            assertOrder: false);
 
     [ConditionalTheory] // From #13805
     [MemberData(nameof(IsAsyncData))]
@@ -703,8 +689,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                 {
                     AssertEqual(l.People[i], r.People[i]);
                 }
-            },
-            entryCount: 36);
+            });
 
     [ConditionalTheory] // From #12088
     [MemberData(nameof(IsAsyncData))]
@@ -724,13 +709,11 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                 {
                     AssertEqual(l.Items[i], r.Items[i]);
                 }
-            },
-            entryCount: 12);
+            });
 
     [ConditionalTheory] // From #12088
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Whats_new_2021_sample_14(bool async)
-        // GroupBy entityType. Issue #17653.
         => AssertTranslationFailed(
             () => AssertQuery(
                 async,
@@ -741,13 +724,11 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
     [ConditionalTheory] // From #12088
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Whats_new_2021_sample_15(bool async)
-        // GroupBy entityType. Issue #17653.
-        => AssertTranslationFailed(
-            () => AssertQuery(
-                async,
-                ss => ss.Set<Person>()
-                    .GroupBy(bp => bp.Feet)
-                    .Select(g => g.OrderByDescending(bp => bp.Id).FirstOrDefault())));
+        => AssertQuery(
+            async,
+            ss => ss.Set<Person>()
+                .GroupBy(bp => bp.Feet)
+                .Select(g => g.OrderByDescending(bp => bp.Id).FirstOrDefault()));
 
     [ConditionalTheory] // From #12573
     [MemberData(nameof(IsAsyncData))]
@@ -771,6 +752,8 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
 
     public abstract class Ef6GroupByFixtureBase : SharedStoreFixtureBase<ArubaContext>, IQueryFixtureBase
     {
+        private ArubaData _expectedData;
+
         protected override string StoreName
             => "Ef6GroupByTest";
 
@@ -809,116 +792,120 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
                 });
         }
 
-        protected override void Seed(ArubaContext context)
-            => new ArubaData(context);
+        protected override Task SeedAsync(ArubaContext context)
+        {
+            var data = new ArubaData();
+            context.AddRange(data.ArubaOwners);
+            context.AddRange(data.NumbersForLinq);
+            context.AddRange(data.ProductsForLinq);
+            context.AddRange(data.CustomersForLinq);
+            context.AddRange(data.OrdersForLinq);
+            context.AddRange(data.People);
+            context.AddRange(data.Feet);
+            context.AddRange(data.Shoes);
+
+            return context.SaveChangesAsync();
+        }
 
         public virtual ISetSource GetExpectedData()
-            => new ArubaData();
+            => _expectedData ??= new ArubaData();
 
-        public IReadOnlyDictionary<Type, object> GetEntitySorters()
-            => new Dictionary<Type, Func<object, object>>
+        public IReadOnlyDictionary<Type, object> EntitySorters { get; } = new Dictionary<Type, Func<object, object>>
+        {
+            { typeof(CustomerForLinq), e => ((CustomerForLinq)e)?.Id },
+            { typeof(OrderForLinq), e => ((OrderForLinq)e)?.Id },
+            { typeof(Person), e => ((Person)e)?.Id },
+            { typeof(Shoes), e => ((Shoes)e)?.Id },
+            { typeof(Feet), e => ((Feet)e)?.Id }
+        }.ToDictionary(e => e.Key, e => (object)e.Value);
+
+        public IReadOnlyDictionary<Type, object> EntityAsserters { get; } = new Dictionary<Type, Action<object, object>>
+        {
             {
-                { typeof(CustomerForLinq), e => ((CustomerForLinq)e)?.Id },
-                { typeof(OrderForLinq), e => ((OrderForLinq)e)?.Id },
-                { typeof(Person), e => ((Person)e)?.Id },
-                { typeof(Shoes), e => ((Shoes)e)?.Id },
-                { typeof(Feet), e => ((Feet)e)?.Id }
-            }.ToDictionary(e => e.Key, e => (object)e.Value);
-
-        public IReadOnlyDictionary<Type, object> GetEntityAsserters()
-            => new Dictionary<Type, Action<object, object>>
-            {
+                typeof(CustomerForLinq), (e, a) =>
                 {
-                    typeof(CustomerForLinq), (e, a) =>
+                    Assert.Equal(e == null, a == null);
+
+                    if (a != null)
                     {
-                        Assert.Equal(e == null, a == null);
+                        var ee = (CustomerForLinq)e;
+                        var aa = (CustomerForLinq)a;
 
-                        if (a != null)
-                        {
-                            var ee = (CustomerForLinq)e;
-                            var aa = (CustomerForLinq)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Region, aa.Region);
-                            Assert.Equal(ee.CompanyName, aa.CompanyName);
-                        }
-                    }
-                },
-                {
-                    typeof(OrderForLinq), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-
-                        if (a != null)
-                        {
-                            var ee = (OrderForLinq)e;
-                            var aa = (OrderForLinq)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Total, aa.Total);
-                            Assert.Equal(ee.OrderDate, aa.OrderDate);
-                        }
-                    }
-                },
-                {
-                    typeof(Person), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-
-                        if (a != null)
-                        {
-                            var ee = (Person)e;
-                            var aa = (Person)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Age, aa.Age);
-                            Assert.Equal(ee.FirstName, aa.FirstName);
-                            Assert.Equal(ee.MiddleInitial, aa.MiddleInitial);
-                            Assert.Equal(ee.LastName, aa.LastName);
-                        }
-                    }
-                },
-                {
-                    typeof(Shoes), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-
-                        if (a != null)
-                        {
-                            var ee = (Shoes)e;
-                            var aa = (Shoes)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Age, aa.Age);
-                            Assert.Equal(ee.Style, aa.Style);
-                        }
-                    }
-                },
-                {
-                    typeof(Feet), (e, a) =>
-                    {
-                        Assert.Equal(e == null, a == null);
-
-                        if (a != null)
-                        {
-                            var ee = (Feet)e;
-                            var aa = (Feet)a;
-
-                            Assert.Equal(ee.Id, aa.Id);
-                            Assert.Equal(ee.Size, aa.Size);
-                        }
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Region, aa.Region);
+                        Assert.Equal(ee.CompanyName, aa.CompanyName);
                     }
                 }
-            }.ToDictionary(e => e.Key, e => (object)e.Value);
+            },
+            {
+                typeof(OrderForLinq), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+
+                    if (a != null)
+                    {
+                        var ee = (OrderForLinq)e;
+                        var aa = (OrderForLinq)a;
+
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Total, aa.Total);
+                        Assert.Equal(ee.OrderDate, aa.OrderDate);
+                    }
+                }
+            },
+            {
+                typeof(Person), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+
+                    if (a != null)
+                    {
+                        var ee = (Person)e;
+                        var aa = (Person)a;
+
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Age, aa.Age);
+                        Assert.Equal(ee.FirstName, aa.FirstName);
+                        Assert.Equal(ee.MiddleInitial, aa.MiddleInitial);
+                        Assert.Equal(ee.LastName, aa.LastName);
+                    }
+                }
+            },
+            {
+                typeof(Shoes), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+
+                    if (a != null)
+                    {
+                        var ee = (Shoes)e;
+                        var aa = (Shoes)a;
+
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Age, aa.Age);
+                        Assert.Equal(ee.Style, aa.Style);
+                    }
+                }
+            },
+            {
+                typeof(Feet), (e, a) =>
+                {
+                    Assert.Equal(e == null, a == null);
+
+                    if (a != null)
+                    {
+                        var ee = (Feet)e;
+                        var aa = (Feet)a;
+
+                        Assert.Equal(ee.Id, aa.Id);
+                        Assert.Equal(ee.Size, aa.Size);
+                    }
+                }
+            }
+        }.ToDictionary(e => e.Key, e => (object)e.Value);
     }
 
-    public class ArubaContext : PoolableDbContext
-    {
-        public ArubaContext(DbContextOptions options)
-            : base(options)
-        {
-        }
-    }
+    public class ArubaContext(DbContextOptions options) : PoolableDbContext(options);
 
     public class ArubaOwner
     {
@@ -928,17 +915,11 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
         public string Alias { get; set; }
     }
 
-    public class NumberForLinq
+    public class NumberForLinq(int value, string name)
     {
-        public NumberForLinq(int value, string name)
-        {
-            Value = value;
-            Name = name;
-        }
-
         public int Id { get; set; }
-        public int Value { get; set; }
-        public string Name { get; set; }
+        public int Value { get; set; } = value;
+        public string Name { get; set; } = name;
     }
 
     public class ProductForLinq
@@ -950,9 +931,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
         public int UnitsInStock { get; set; }
     }
 
-    public class FeaturedProductForLinq : ProductForLinq
-    {
-    }
+    public class FeaturedProductForLinq : ProductForLinq;
 
     public class CustomerForLinq
     {
@@ -1007,7 +986,7 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
         public IReadOnlyList<Feet> Feet { get; }
         public IReadOnlyList<Shoes> Shoes { get; }
 
-        public ArubaData(ArubaContext context = null)
+        public ArubaData()
         {
             ArubaOwners = CreateArubaOwners();
             NumbersForLinq = CreateNumbersForLinq();
@@ -1017,19 +996,6 @@ public abstract class Ef6GroupByTestBase<TFixture> : QueryTestBase<TFixture>
             People = CreatePeople();
             Feet = CreateFeet(People);
             Shoes = CreateShoes(People);
-
-            if (context != null)
-            {
-                context.AddRange(ArubaOwners);
-                context.AddRange(NumbersForLinq);
-                context.AddRange(ProductsForLinq);
-                context.AddRange(CustomersForLinq);
-                context.AddRange(OrdersForLinq);
-                context.AddRange(People);
-                context.AddRange(Feet);
-                context.AddRange(Shoes);
-                context.SaveChanges();
-            }
         }
 
         public IQueryable<TEntity> Set<TEntity>()

@@ -130,8 +130,8 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
     public static IEnumerable<ISequence> GetSequences(IReadOnlyModel model)
-        => ((SortedDictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences])
-            ?.Values
+        => ((Dictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences])
+            ?.OrderBy(t => t.Key).Select(t => t.Value)
             ?? Enumerable.Empty<ISequence>();
 
     /// <summary>
@@ -142,7 +142,7 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
     /// </summary>
     public static ISequence? FindSequence(IReadOnlyModel model, string name, string? schema)
     {
-        var sequences = (SortedDictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
+        var sequences = (Dictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
         if (sequences == null
             || !sequences.TryGetValue((name, schema), out var sequence))
         {
@@ -165,10 +165,10 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
         ConfigurationSource configurationSource)
     {
         var sequence = new Sequence(name, schema, model, configurationSource);
-        var sequences = (SortedDictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
+        var sequences = (Dictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
         if (sequences == null)
         {
-            sequences = new SortedDictionary<(string, string?), ISequence>();
+            sequences = new Dictionary<(string, string?), ISequence>();
             model[RelationalAnnotationNames.Sequences] = sequences;
         }
 
@@ -189,8 +189,8 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
     {
         sequence.EnsureMutable();
 
-        var sequences = (SortedDictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
-        var tuple = (sequence.Name, sequence.Schema);
+        var sequences = (Dictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
+        var tuple = (sequence.Name, sequence.ModelSchema);
         if (sequences == null
             || !sequences.ContainsKey(tuple))
         {
@@ -201,7 +201,7 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
 
         sequence.Name = name;
 
-        sequences.Add((name, sequence.Schema), sequence);
+        sequences.Add((name, sequence.ModelSchema), sequence);
 
         return sequence;
     }
@@ -214,7 +214,7 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
     /// </summary>
     public static Sequence? RemoveSequence(IMutableModel model, string name, string? schema)
     {
-        var sequences = (SortedDictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
+        var sequences = (Dictionary<(string, string?), ISequence>?)model[RelationalAnnotationNames.Sequences];
         if (sequences == null
             || !sequences.TryGetValue((name, schema), out var sequence))
         {
@@ -237,7 +237,7 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
     public virtual InternalSequenceBuilder Builder
     {
         [DebuggerStepThrough]
-        get => _builder ?? throw new InvalidOperationException(CoreStrings.ObjectRemovedFromModel);
+        get => _builder ?? throw new InvalidOperationException(CoreStrings.ObjectRemovedFromModel(Name));
     }
 
     /// <summary>
@@ -279,6 +279,15 @@ public class Sequence : ConventionAnnotatable, IMutableSequence, IConventionSequ
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
     public virtual string Name { get; set; }
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    public virtual string? ModelSchema
+        => _schema;
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to

@@ -108,7 +108,7 @@ public static class PropertyBaseExtensions
     /// </summary>
     public static bool TryGetMemberInfo(
         this IPropertyBase propertyBase,
-        bool forConstruction,
+        bool forMaterialization,
         bool forSet,
         out MemberInfo? memberInfo,
         out string? errorMessage)
@@ -121,14 +121,14 @@ public static class PropertyBaseExtensions
         var setterProperty = propertyInfo?.FindSetterProperty();
         var getterProperty = propertyInfo?.FindGetterProperty();
 
-        var isCollectionNav = (propertyBase as IReadOnlyNavigation)?.IsCollection == true;
+        var isCollectionNav = (propertyBase as IReadOnlyNavigationBase)?.IsCollection == true;
         var hasField = fieldInfo != null;
         var hasSetter = setterProperty != null;
         var hasGetter = getterProperty != null;
 
         var mode = propertyBase.GetPropertyAccessMode();
 
-        if (forConstruction)
+        if (forMaterialization)
         {
             switch (mode)
             {
@@ -248,9 +248,9 @@ public static class PropertyBaseExtensions
                 }
             }
 
-            if (mode == PropertyAccessMode.PreferProperty
-                || mode == PropertyAccessMode.FieldDuringConstruction
-                || mode == PropertyAccessMode.PreferFieldDuringConstruction)
+            if (mode is PropertyAccessMode.PreferProperty
+                or PropertyAccessMode.FieldDuringConstruction
+                or PropertyAccessMode.PreferFieldDuringConstruction)
             {
                 if (hasSetter)
                 {
@@ -317,9 +317,9 @@ public static class PropertyBaseExtensions
             }
         }
 
-        if (mode == PropertyAccessMode.PreferProperty
-            || mode == PropertyAccessMode.FieldDuringConstruction
-            || mode == PropertyAccessMode.PreferFieldDuringConstruction)
+        if (mode is PropertyAccessMode.PreferProperty
+            or PropertyAccessMode.FieldDuringConstruction
+            or PropertyAccessMode.PreferFieldDuringConstruction)
         {
             if (hasGetter)
             {
@@ -339,15 +339,14 @@ public static class PropertyBaseExtensions
     }
 
     private static string GetNoFieldErrorMessage(IPropertyBase propertyBase)
-    {
-        var constructorBinding = ((EntityType)propertyBase.DeclaringType).ConstructorBinding;
-        return constructorBinding?.ParameterBindings
-                .OfType<ServiceParameterBinding>()
-                .Any(b => b.ServiceType == typeof(ILazyLoader))
+        => ((EntityType)propertyBase.DeclaringType).GetServiceProperties()
+            .Any(p => typeof(ILazyLoader).IsAssignableFrom(p.ClrType))
+            || ((EntityType)propertyBase.DeclaringType).ConstructorBinding?.ParameterBindings
+            .OfType<ServiceParameterBinding>()
+            .Any(b => b.ServiceType == typeof(ILazyLoader))
             == true
                 ? CoreStrings.NoBackingFieldLazyLoading(
                     propertyBase.Name, propertyBase.DeclaringType.DisplayName())
                 : CoreStrings.NoBackingField(
                     propertyBase.Name, propertyBase.DeclaringType.DisplayName(), nameof(PropertyAccessMode));
-    }
 }

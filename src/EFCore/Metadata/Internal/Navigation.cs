@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore.Internal;
 
 namespace Microsoft.EntityFrameworkCore.Metadata.Internal;
@@ -43,11 +44,21 @@ public class Navigation : PropertyBase, IMutableNavigation, IConventionNavigatio
     ///     any release. You should only use it directly in your code with extreme caution and knowing that
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
+    [DynamicallyAccessedMembers(IEntityType.DynamicallyAccessedMemberTypes)]
     public override Type ClrType
         => this.GetIdentifyingMemberInfo()?.GetMemberType()
             ?? (((IReadOnlyNavigation)this).IsCollection
                 ? typeof(IEnumerable<>).MakeGenericType(TargetEntityType.ClrType)
                 : TargetEntityType.ClrType);
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    public virtual object? Sentinel
+        => null;
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -66,7 +77,7 @@ public class Navigation : PropertyBase, IMutableNavigation, IConventionNavigatio
     public virtual InternalNavigationBuilder Builder
     {
         [DebuggerStepThrough]
-        get => _builder ?? throw new InvalidOperationException(CoreStrings.ObjectRemovedFromModel);
+        get => _builder ?? throw new InvalidOperationException(CoreStrings.ObjectRemovedFromModel(Name));
     }
 
     /// <summary>
@@ -76,7 +87,8 @@ public class Navigation : PropertyBase, IMutableNavigation, IConventionNavigatio
     ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
     public virtual bool IsInModel
-        => _builder is not null;
+        => _builder is not null
+            && ForeignKey.IsInModel;
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -172,7 +184,7 @@ public class Navigation : PropertyBase, IMutableNavigation, IConventionNavigatio
     /// </summary>
     public override PropertyAccessMode GetPropertyAccessMode()
         => (PropertyAccessMode)(this[CoreAnnotationNames.PropertyAccessMode]
-            ?? ((IReadOnlyTypeBase)DeclaringType).GetNavigationAccessMode());
+            ?? DeclaringEntityType.GetNavigationAccessMode());
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -293,11 +305,7 @@ public class Navigation : PropertyBase, IMutableNavigation, IConventionNavigatio
             ref _collectionAccessor,
             ref _collectionAccessorInitialized,
             this,
-            static navigation =>
-            {
-                navigation.EnsureReadOnly();
-                return new ClrCollectionAccessorFactory().Create(navigation);
-            });
+            static navigation => ClrCollectionAccessorFactory.Instance.Create(navigation));
 
     /// <summary>
     ///     Runs the conventions when an annotation was set or removed.

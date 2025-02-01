@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Castle.DynamicProxy;
-using Castle.DynamicProxy.Generators;
 using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
@@ -206,28 +205,28 @@ public class ProxyTests
     public void Throws_if_type_not_available_to_Castle()
     {
         using var context = new NeweyContextN4();
-        Assert.Throws<GeneratorException>(() => context.CreateProxy<McLarenMp421>());
+        Assert.Throws<ArgumentException>(() => context.CreateProxy<McLarenMp421>());
     }
 
     [ConditionalFact]
     public void Throws_if_constructor_not_available_to_Castle()
     {
         using var context = new NeweyContextN5();
-        Assert.Throws<InvalidProxyConstructorArgumentsException>(() => context.CreateProxy<RedBullRb3>());
+        Assert.Throws<ArgumentException>(() => context.CreateProxy<RedBullRb3>());
     }
 
     [ConditionalFact]
     public void CreateProxy_throws_if_constructor_args_do_not_match()
     {
         using var context = new NeweyContext();
-        Assert.Throws<InvalidProxyConstructorArgumentsException>(() => context.CreateProxy<March881>(77, 88));
+        Assert.Throws<ArgumentException>(() => context.CreateProxy<March881>(77, 88));
     }
 
     [ConditionalFact]
     public void CreateProxy_throws_if_wrong_number_of_constructor_args()
     {
         using var context = new NeweyContext();
-        Assert.Throws<InvalidProxyConstructorArgumentsException>(() => context.CreateProxy<March881>(77, 88, 99));
+        Assert.Throws<ArgumentException>(() => context.CreateProxy<March881>(77, 88, 99));
     }
 
     [ConditionalFact]
@@ -290,33 +289,20 @@ public class ProxyTests
         public virtual int Id { get; set; }
     }
 
-    public class March881
+    public class March881(int id, string sponsor)
     {
-        public March881(int id, string sponsor)
-        {
-            Id = id;
-            Sponsor = sponsor;
-        }
+        public virtual int Id { get; set; } = id;
 
-        public virtual int Id { get; set; }
-
-        public virtual string Sponsor { get; set; }
+        public virtual string Sponsor { get; set; } = sponsor;
     }
 
-    public class WilliamsFw14
+    public class WilliamsFw14(DbContext context, int id, string sponsor)
     {
-        public WilliamsFw14(DbContext context, int id, string sponsor)
-        {
-            Context = context;
-            Id = id;
-            Sponsor = sponsor;
-        }
+        public DbContext Context { get; set; } = context;
 
-        public DbContext Context { get; set; }
+        public virtual int Id { get; set; } = id;
 
-        public virtual int Id { get; set; }
-
-        public virtual string Sponsor { get; set; }
+        public virtual string Sponsor { get; set; } = sponsor;
     }
 
     public class SharedTypeEntityType
@@ -335,44 +321,30 @@ public class ProxyTests
     }
 
     [Owned]
-    public class IsWeak
-    {
-    }
+    public class IsWeak;
 
     [Owned]
-    public class IsOwnedButNotWeak
-    {
-    }
+    public class IsOwnedButNotWeak;
 
     public record March86C : IndyCar
     {
         public virtual int Id { get; init; }
     }
 
-    public record IndyCar
-    {
-    }
+    public record IndyCar;
 
-    private class NeweyContext : DbContext
+    private class NeweyContext(string dbName = null, bool useLazyLoading = true, bool useChangeDetection = false) : DbContext
     {
-        private readonly IServiceProvider _internalServiceProvider;
+        private readonly IServiceProvider _internalServiceProvider
+            = new ServiceCollection()
+                .AddEntityFrameworkInMemoryDatabase()
+                .AddEntityFrameworkProxies()
+                .BuildServiceProvider(validateScopes: true);
+
         private static readonly InMemoryDatabaseRoot _dbRoot = new();
-        private readonly bool _useLazyLoadingProxies;
-        private readonly bool _useChangeDetectionProxies;
-        private readonly string _dbName;
-
-        public NeweyContext(string dbName = null, bool useLazyLoading = true, bool useChangeDetection = false)
-        {
-            _internalServiceProvider
-                = new ServiceCollection()
-                    .AddEntityFrameworkInMemoryDatabase()
-                    .AddEntityFrameworkProxies()
-                    .BuildServiceProvider(validateScopes: true);
-
-            _dbName = dbName;
-            _useLazyLoadingProxies = useLazyLoading;
-            _useChangeDetectionProxies = useChangeDetection;
-        }
+        private readonly bool _useLazyLoadingProxies = useLazyLoading;
+        private readonly bool _useChangeDetectionProxies = useChangeDetection;
+        private readonly string _dbName = dbName;
 
         public NeweyContext(
             IServiceProvider internalServiceProvider,
@@ -380,9 +352,7 @@ public class ProxyTests
             bool useLazyLoading = true,
             bool useChangeDetection = false)
             : this(dbName, useLazyLoading, useChangeDetection)
-        {
-            _internalServiceProvider = internalServiceProvider;
-        }
+            => _internalServiceProvider = internalServiceProvider;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {

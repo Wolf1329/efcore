@@ -101,13 +101,7 @@ public class RelationalConnectionTest
             Assert.Throws<InvalidOperationException>(() => context.Database.GetDbConnection()).Message);
     }
 
-    private class ConstructorTestContext1A : DbContext
-    {
-        public ConstructorTestContext1A(DbContextOptions options)
-            : base(options)
-        {
-        }
-    }
+    private class ConstructorTestContext1A(DbContextOptions options) : DbContext(options);
 
     private class ConstructorTestContextNoConfiguration : DbContext
     {
@@ -614,6 +608,69 @@ public class RelationalConnectionTest
         Assert.Equal(0, dbConnection.DisposeCount);
     }
 
+    [ConditionalFact]
+    public void Existing_connection_is_disposed_after_being_opened_and_closed_if_owned()
+    {
+        var dbConnection = new FakeDbConnection("Database=FrodoLives");
+        var connection = new FakeRelationalConnection(
+            CreateOptions(new FakeRelationalOptionsExtension().WithConnection(dbConnection, owned: true)));
+
+        Assert.Equal(0, connection.DbConnections.Count);
+        Assert.Same(dbConnection, connection.DbConnection);
+
+        connection.Open();
+        connection.Close();
+        connection.Dispose();
+
+        Assert.Equal(1, dbConnection.OpenCount);
+        Assert.Equal(2, dbConnection.CloseCount);
+        Assert.Equal(1, dbConnection.DisposeCount);
+
+        Assert.Equal(0, connection.DbConnections.Count);
+    }
+
+    [ConditionalFact]
+    public void Existing_connection_is_disposed_if_owned_and_replaced()
+    {
+        var dbConnection1 = new FakeDbConnection("Database=FrodoLives");
+        var connection = new FakeRelationalConnection(
+            CreateOptions(new FakeRelationalOptionsExtension().WithConnection(dbConnection1, owned: true)));
+
+        Assert.Equal(0, connection.DbConnections.Count);
+        Assert.Same(dbConnection1, connection.DbConnection);
+
+        Assert.Equal(0, dbConnection1.OpenCount);
+        Assert.Equal(0, dbConnection1.CloseCount);
+        Assert.Equal(0, dbConnection1.DisposeCount);
+
+        Assert.Equal(0, connection.DbConnections.Count);
+
+        var dbConnection2 = new FakeDbConnection("Database=FrodoLives");
+        connection.SetDbConnection(dbConnection2, contextOwnsConnection: true);
+
+        Assert.Equal(0, dbConnection1.OpenCount);
+        Assert.Equal(1, dbConnection1.CloseCount);
+        Assert.Equal(1, dbConnection1.DisposeCount);
+
+        Assert.Equal(0, dbConnection2.OpenCount);
+        Assert.Equal(0, dbConnection2.CloseCount);
+        Assert.Equal(0, dbConnection2.DisposeCount);
+
+        Assert.Equal(0, connection.DbConnections.Count);
+
+        connection.Dispose();
+
+        Assert.Equal(0, dbConnection1.OpenCount);
+        Assert.Equal(1, dbConnection1.CloseCount);
+        Assert.Equal(1, dbConnection1.DisposeCount);
+
+        Assert.Equal(0, dbConnection2.OpenCount);
+        Assert.Equal(1, dbConnection2.CloseCount);
+        Assert.Equal(1, dbConnection2.DisposeCount);
+
+        Assert.Equal(0, connection.DbConnections.Count);
+    }
+
     [ConditionalTheory]
     [InlineData(true)]
     [InlineData(false)]
@@ -832,6 +889,24 @@ public class RelationalConnectionTest
     }
 
     [ConditionalFact]
+    public void Can_create_new_connection_with_CommandTimeout_set_to_zero()
+    {
+        using var connection = new FakeRelationalConnection(
+            CreateOptions(
+                new FakeRelationalOptionsExtension()
+                    .WithConnectionString("Database=FrodoLives")
+                    .WithCommandTimeout(0)));
+        Assert.Equal(0, connection.CommandTimeout);
+    }
+
+    [ConditionalFact]
+    public void Throws_if_create_new_connection_with_CommandTimeout_negative()
+        => Assert.Throws<InvalidOperationException>(
+            () => new FakeRelationalOptionsExtension()
+                .WithConnectionString("Database=FrodoLives")
+                .WithCommandTimeout(-1));
+
+    [ConditionalFact]
     public void Can_set_CommandTimeout()
     {
         using var connection = new FakeRelationalConnection(
@@ -839,6 +914,16 @@ public class RelationalConnectionTest
         connection.CommandTimeout = 88;
 
         Assert.Equal(88, connection.CommandTimeout);
+    }
+
+    [ConditionalFact]
+    public void Can_set_CommandTimeout_to_zero()
+    {
+        using var connection = new FakeRelationalConnection(
+            CreateOptions(new FakeRelationalOptionsExtension().WithConnectionString("Database=FrodoLives")));
+        connection.CommandTimeout = 0;
+
+        Assert.Equal(0, connection.CommandTimeout);
     }
 
     [ConditionalFact]
@@ -898,30 +983,12 @@ public class RelationalConnectionTest
             return serviceCollection;
         }
 
-        private sealed class ExtensionInfo : RelationalExtensionInfo
+        private sealed class ExtensionInfo(IDbContextOptionsExtension extension) : RelationalExtensionInfo(extension)
         {
-            public ExtensionInfo(IDbContextOptionsExtension extension)
-                : base(extension)
-            {
-            }
-
             public override void PopulateDebugInfo(IDictionary<string, string> debugInfo)
             {
             }
         }
-    }
-
-    [ConditionalFact]
-    public void Throws_if_no_connection_or_connection_string_is_specified_only_when_accessed()
-    {
-        var connection = new FakeRelationalConnection(CreateOptions(new FakeRelationalOptionsExtension()));
-
-        Assert.Equal(
-            RelationalStrings.NoConnectionOrConnectionString,
-            Assert.Throws<InvalidOperationException>(
-                () => connection.DbConnection).Message);
-
-        Assert.Null(connection.ConnectionString);
     }
 
     [ConditionalFact]
@@ -960,6 +1027,50 @@ public class RelationalConnectionTest
             RelationalStrings.NoActiveTransaction,
             Assert.Throws<InvalidOperationException>(
                 () => connection.RollbackTransaction()).Message);
+    }
+
+    [ConditionalFact]
+    public void Throws_when_changing_DbConnection_if_current_is_open_and_owned()
+    {
+        using var connection = new FakeRelationalConnection(
+            CreateOptions(new FakeRelationalOptionsExtension().WithConnectionString("Database=FrodoLives")));
+        Assert.Equal(0, connection.DbConnections.Count);
+
+        connection.Open();
+
+        Assert.Equal(
+            RelationalStrings.CannotChangeWhenOpen,
+            Assert.Throws<InvalidOperationException>(() => connection.DbConnection = new FakeDbConnection("Fake")).Message);
+    }
+
+    [ConditionalFact]
+    public void Disposes_when_changing_DbConnection_if_current_is_owned_and_not_open()
+    {
+        using var connection = new FakeRelationalConnection(
+            CreateOptions(new FakeRelationalOptionsExtension().WithConnectionString("Database=FrodoLives")));
+        Assert.Equal(0, connection.DbConnections.Count);
+
+        var dbConnection = connection.DbConnection;
+
+        Assert.Raises<EventArgs>(
+            h => dbConnection.Disposed += h.Invoke,
+            h => dbConnection.Disposed -= h.Invoke,
+            () => connection.DbConnection = new FakeDbConnection("Fake"));
+    }
+
+    [ConditionalFact]
+    public void Does_not_dispose_when_changing_DbConnection_if_current_is_open_and_not_owned()
+    {
+        using var connection = new FakeRelationalConnection();
+        Assert.Equal(0, connection.DbConnections.Count);
+
+        var dbConnection = new FakeDbConnection("Database=FrodoLives");
+        connection.DbConnection = dbConnection;
+        connection.Open();
+
+        connection.DbConnection = new FakeDbConnection("Database=FrodoLives");
+
+        Assert.Equal(ConnectionState.Open, dbConnection.State);
     }
 
     private static IDbContextOptions CreateOptions(params RelationalOptionsExtension[] optionsExtensions)

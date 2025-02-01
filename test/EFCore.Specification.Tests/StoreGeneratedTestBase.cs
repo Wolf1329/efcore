@@ -7,43 +7,35 @@ using Microsoft.EntityFrameworkCore.ValueGeneration.Internal;
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore;
 
-#nullable enable
-
-public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
+public abstract class StoreGeneratedTestBase<TFixture>(TFixture fixture) : IClassFixture<TFixture>
     where TFixture : StoreGeneratedTestBase<TFixture>.StoreGeneratedFixtureBase, new()
 {
-    protected StoreGeneratedTestBase(TFixture fixture)
-    {
-        Fixture = fixture;
-    }
-
-    protected TFixture Fixture { get; }
+    protected TFixture Fixture { get; } = fixture;
 
     [ConditionalFact]
-    public virtual void Value_generation_works_for_common_GUID_conversions()
+    public virtual async Task Value_generation_works_for_common_GUID_conversions()
     {
-        ValueGenerationPositive<Guid, GuidToString>();
-        ValueGenerationPositive<Guid, GuidToBytes>();
+        await ValueGenerationPositive<Guid, GuidToString>(Fixture.GuidSentinel);
+        await ValueGenerationPositive<Guid, GuidToBytes>(Fixture.GuidSentinel);
     }
 
-    private void ValueGenerationPositive<TKey, TEntity>()
+    private Task ValueGenerationPositive<TKey, TEntity>(TKey? sentinel)
         where TEntity : WithConverter<TKey>, new()
     {
-        TKey? id;
+        TKey? id = default;
 
-        using (var context = CreateContext())
-        {
-            var entity = context.Add(new TEntity()).Entity;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = context.Add(new TEntity { Id = sentinel }).Entity;
 
-            context.SaveChanges();
+                await context.SaveChangesAsync();
 
-            id = entity.Id;
-        }
-
-        using (var context = CreateContext())
-        {
-            Assert.Equal(id, context.Set<TEntity>().Single(e => e.Id!.Equals(id)).Id);
-        }
+                id = entity.Id;
+            }, async context =>
+            {
+                Assert.Equal(id, (await context.Set<TEntity>().SingleAsync(e => e.Id!.Equals(id))).Id);
+            });
     }
 
     [ConditionalTheory]
@@ -59,15 +51,15 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateThrowBeforeUseAfter))]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeIgnoreAfter))]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeThrowAfter))]
-    public virtual void Before_save_throw_always_throws_if_value_set(string propertyName)
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Before_save_throw_always_throws_if_value_set(string propertyName)
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Add(WithValue(propertyName));
+                context.Add(WithValue(propertyName, Fixture.IntSentinel, Fixture.StringSentinel));
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyBeforeSave(propertyName, "Anais"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalTheory]
@@ -83,19 +75,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateThrowBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeThrowAfter), "Rabbit")]
-    public virtual void Before_save_throw_ignores_value_if_not_set(string propertyName, string expectedValue)
+    public virtual Task Before_save_throw_ignores_value_if_not_set(string propertyName, string? expectedValue)
     {
         var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Anais()).Entity;
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
-            },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            }, async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
@@ -114,50 +105,53 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateUseBeforeUseAfter))]
     [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter))]
     [InlineData(nameof(Anais.OnUpdateUseBeforeThrowAfter))]
-    public virtual void Before_save_use_always_uses_value_if_set(string propertyName)
+    public virtual Task Before_save_use_always_uses_value_if_set(string propertyName)
     {
         var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(WithValue(propertyName)).Entity;
+                var entity = context.Add(WithValue(propertyName, Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
-            },
-            context => Assert.Equal("Pink", GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            }, async context => Assert.Equal("Pink", GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
-    [InlineData(nameof(Anais.Never), null)]
+    [InlineData(nameof(Anais.Never), "S")]
     [InlineData(nameof(Anais.OnAdd), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdate), null)]
-    [InlineData(nameof(Anais.NeverUseBeforeUseAfter), null)]
-    [InlineData(nameof(Anais.NeverUseBeforeIgnoreAfter), null)]
-    [InlineData(nameof(Anais.NeverUseBeforeThrowAfter), null)]
+    [InlineData(nameof(Anais.OnUpdate), "S")]
+    [InlineData(nameof(Anais.NeverUseBeforeUseAfter), "S")]
+    [InlineData(nameof(Anais.NeverUseBeforeIgnoreAfter), "S")]
+    [InlineData(nameof(Anais.NeverUseBeforeThrowAfter), "S")]
     [InlineData(nameof(Anais.OnAddUseBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddUseBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddUseBeforeThrowAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeThrowAfter), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeUseAfter), null)]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter), null)]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeThrowAfter), null)]
-    public virtual void Before_save_use_ignores_value_if_not_set(string propertyName, string expectedValue)
+    [InlineData(nameof(Anais.OnUpdateUseBeforeUseAfter), "S")]
+    [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter), "S")]
+    [InlineData(nameof(Anais.OnUpdateUseBeforeThrowAfter), "S")]
+    public virtual Task Before_save_use_ignores_value_if_not_set(string propertyName, string? expectedValue)
     {
-        var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
-            {
-                var entity = context.Add(new Anais()).Entity;
+        if (expectedValue == "S")
+        {
+            expectedValue = Fixture.StringSentinel;
+        }
 
-                context.SaveChanges();
+        var id = 0;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
+
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
-            },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            }, async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
@@ -174,19 +168,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeThrowAfter), "Rabbit")]
-    public virtual void Before_save_ignore_ignores_value_if_not_set(string propertyName, string expectedValue)
+    public virtual Task Before_save_ignore_ignores_value_if_not_set(string propertyName, string? expectedValue)
     {
         var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Anais()).Entity;
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
-            },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            }, async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
@@ -203,19 +196,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeThrowAfter), "Rabbit")]
-    public virtual void Before_save_ignore_ignores_value_even_if_set(string propertyName, string expectedValue)
+    public virtual Task Before_save_ignore_ignores_value_even_if_set(string propertyName, string? expectedValue)
     {
         var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(WithValue(propertyName)).Entity;
+                var entity = context.Add(WithValue(propertyName, Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
-            },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            }, async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
@@ -231,19 +223,19 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateUseBeforeThrowAfter))]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeThrowAfter))]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeThrowAfter))]
-    public virtual void After_save_throw_always_throws_if_value_modified(string propertyName)
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task After_save_throw_always_throws_if_value_modified(string propertyName)
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Attach(WithValue(propertyName, 1)).Property(propertyName).IsModified = true;
+                context.Attach(WithValue(propertyName, 1, Fixture.StringSentinel)).Property(propertyName).IsModified = true;
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyAfterSave(propertyName, "Anais"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalTheory]
-    [InlineData(nameof(Anais.NeverUseBeforeThrowAfter), null)]
+    [InlineData(nameof(Anais.NeverUseBeforeThrowAfter), "S")]
     [InlineData(nameof(Anais.NeverIgnoreBeforeThrowAfter), null)]
     [InlineData(nameof(Anais.NeverThrowBeforeThrowAfter), null)]
     [InlineData(nameof(Anais.OnAddUseBeforeThrowAfter), "Rabbit")]
@@ -252,37 +244,42 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeThrowAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateIgnoreBeforeThrowAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateThrowBeforeThrowAfter), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeThrowAfter), null)]
+    [InlineData(nameof(Anais.OnUpdateUseBeforeThrowAfter), "S")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeThrowAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeThrowAfter), "Rabbit")]
-    public virtual void After_save_throw_ignores_value_if_not_modified(string propertyName, string expectedValue)
+    public virtual Task After_save_throw_ignores_value_if_not_modified(string propertyName, string? expectedValue)
     {
-        var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
-            {
-                var entity = context.Add(new Anais()).Entity;
+        if (expectedValue == "S")
+        {
+            expectedValue = Fixture.StringSentinel;
+        }
 
-                context.SaveChanges();
+        var id = 0;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
+
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var entry = context.Entry(context.Set<Anais>().Find(id)!);
+                var entry = context.Entry((await context.Set<Anais>().FindAsync(id))!);
                 entry.State = EntityState.Modified;
                 entry.Property(propertyName).CurrentValue = "Daisy";
                 entry.Property(propertyName).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
     [InlineData(nameof(Anais.OnAddOrUpdate), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdate), null)]
-    [InlineData(nameof(Anais.NeverUseBeforeIgnoreAfter), null)]
+    [InlineData(nameof(Anais.OnUpdate), "S")]
+    [InlineData(nameof(Anais.NeverUseBeforeIgnoreAfter), "S")]
     [InlineData(nameof(Anais.NeverIgnoreBeforeIgnoreAfter), null)]
     [InlineData(nameof(Anais.NeverThrowBeforeIgnoreAfter), null)]
     [InlineData(nameof(Anais.OnAddUseBeforeIgnoreAfter), "Rabbit")]
@@ -291,37 +288,42 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateIgnoreBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateThrowBeforeIgnoreAfter), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter), null)]
+    [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter), "S")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeIgnoreAfter), "Rabbit")]
-    public virtual void After_save_ignore_ignores_value_if_not_modified(string propertyName, string expectedValue)
+    public virtual Task After_save_ignore_ignores_value_if_not_modified(string propertyName, string? expectedValue)
     {
-        var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
-            {
-                var entity = context.Add(new Anais()).Entity;
+        if (expectedValue == "S")
+        {
+            expectedValue = Fixture.StringSentinel;
+        }
 
-                context.SaveChanges();
+        var id = 0;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
+
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var entry = context.Entry(context.Set<Anais>().Find(id)!);
+                var entry = context.Entry((await context.Set<Anais>().FindAsync(id))!);
                 entry.State = EntityState.Modified;
                 entry.Property(propertyName).CurrentValue = "Daisy";
                 entry.Property(propertyName).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
     [InlineData(nameof(Anais.OnAddOrUpdate), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdate), null)]
-    [InlineData(nameof(Anais.NeverUseBeforeIgnoreAfter), null)]
+    [InlineData(nameof(Anais.OnUpdate), "S")]
+    [InlineData(nameof(Anais.NeverUseBeforeIgnoreAfter), "S")]
     [InlineData(nameof(Anais.NeverIgnoreBeforeIgnoreAfter), null)]
     [InlineData(nameof(Anais.NeverThrowBeforeIgnoreAfter), null)]
     [InlineData(nameof(Anais.OnAddUseBeforeIgnoreAfter), "Rabbit")]
@@ -330,39 +332,44 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateIgnoreBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateThrowBeforeIgnoreAfter), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter), null)]
+    [InlineData(nameof(Anais.OnUpdateUseBeforeIgnoreAfter), "S")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeIgnoreAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeIgnoreAfter), "Rabbit")]
-    public virtual void After_save_ignore_ignores_value_even_if_modified(string propertyName, string expectedValue)
+    public virtual Task After_save_ignore_ignores_value_even_if_modified(string propertyName, string? expectedValue)
     {
-        var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
-            {
-                var entity = context.Add(new Anais()).Entity;
+        if (expectedValue == "S")
+        {
+            expectedValue = Fixture.StringSentinel;
+        }
 
-                context.SaveChanges();
+        var id = 0;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
+
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var entry = context.Entry(context.Set<Anais>().Find(id)!);
+                var entry = context.Entry((await context.Set<Anais>().FindAsync(id))!);
                 entry.State = EntityState.Modified;
                 entry.Property(propertyName).CurrentValue = "Daisy";
                 entry.Property(propertyName).IsModified = true;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
-    [InlineData(nameof(Anais.Never), null)]
+    [InlineData(nameof(Anais.Never), "S")]
     [InlineData(nameof(Anais.OnAdd), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdate), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdate), null)]
-    [InlineData(nameof(Anais.NeverUseBeforeUseAfter), null)]
+    [InlineData(nameof(Anais.OnUpdate), "S")]
+    [InlineData(nameof(Anais.NeverUseBeforeUseAfter), "S")]
     [InlineData(nameof(Anais.NeverIgnoreBeforeUseAfter), null)]
     [InlineData(nameof(Anais.NeverThrowBeforeUseAfter), null)]
     [InlineData(nameof(Anais.OnAddUseBeforeUseAfter), "Rabbit")]
@@ -371,31 +378,36 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnAddOrUpdateUseBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateIgnoreBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnAddOrUpdateThrowBeforeUseAfter), "Rabbit")]
-    [InlineData(nameof(Anais.OnUpdateUseBeforeUseAfter), null)]
+    [InlineData(nameof(Anais.OnUpdateUseBeforeUseAfter), "S")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeUseAfter), "Rabbit")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeUseAfter), "Rabbit")]
-    public virtual void After_save_use_ignores_value_if_not_modified(string propertyName, string expectedValue)
+    public virtual Task After_save_use_ignores_value_if_not_modified(string propertyName, string? expectedValue)
     {
-        var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
-            {
-                var entity = context.Add(new Anais()).Entity;
+        if (expectedValue == "S")
+        {
+            expectedValue = Fixture.StringSentinel;
+        }
 
-                context.SaveChanges();
+        var id = 0;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
+
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var entry = context.Entry(context.Set<Anais>().Find(id)!);
+                var entry = context.Entry((await context.Set<Anais>().FindAsync(id))!);
                 entry.State = EntityState.Modified;
                 entry.Property(propertyName).CurrentValue = "Daisy";
                 entry.Property(propertyName).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
     [ConditionalTheory]
@@ -413,31 +425,31 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [InlineData(nameof(Anais.OnUpdateUseBeforeUseAfter), "Daisy")]
     [InlineData(nameof(Anais.OnUpdateIgnoreBeforeUseAfter), "Daisy")]
     [InlineData(nameof(Anais.OnUpdateThrowBeforeUseAfter), "Daisy")]
-    public virtual void After_save_use_uses_value_if_modified(string propertyName, string expectedValue)
+    public virtual Task After_save_use_uses_value_if_modified(string propertyName, string expectedValue)
     {
         var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Anais()).Entity;
+                var entity = context.Add(Anais.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var entry = context.Entry(context.Set<Anais>().Find(id)!);
+                var entry = context.Entry((await context.Set<Anais>().FindAsync(id))!);
                 entry.State = EntityState.Modified;
                 entry.Property(propertyName).CurrentValue = "Daisy";
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context => Assert.Equal(expectedValue, GetValue(context.Set<Anais>().Find(id)!, propertyName)));
+            async context => Assert.Equal(expectedValue, GetValue((await context.Set<Anais>().FindAsync(id))!, propertyName)));
     }
 
-    private static Anais WithValue(string propertyName, int id = 0)
-        => SetValue(new Anais { Id = id }, propertyName);
+    private static Anais WithValue(string propertyName, int id, string? sentinel)
+        => SetValue(Anais.Create(id, sentinel), propertyName);
 
     private static Anais SetValue(Anais entity, string propertyName)
     {
@@ -449,35 +461,37 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
         => (string?)entity.GetType().GetTypeInfo().GetDeclaredProperty(propertyName)!.GetValue(entity);
 
     [ConditionalFact]
-    public virtual void Identity_key_with_read_only_before_save_throws_if_explicit_values_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Identity_key_with_read_only_before_save_throws_if_explicit_values_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Add(new Gumball { Id = 1 });
+                context.Add(Gumball.Create(Fixture.IntSentinel + 1, Fixture.StringSentinel));
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyBeforeSave("Id", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Added_entity_with_temporary_value_gets_value_from_store()
+    public virtual Task Identity_property_on_Added_entity_with_temporary_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entry = context.Add(new Gumball { Identity = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.Identity = "Masami";
+                var entry = context.Add(gumball);
                 entry.Property(e => e.Identity).IsTemporary = true;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entry.Entity.Id;
 
                 Assert.Equal("Banana Joe", entry.Entity.Identity);
                 Assert.False(entry.Property(e => e.Identity).IsTemporary);
             },
-            context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).Identity));
+            async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Identity));
     }
 
     protected class CompositePrincipal
@@ -496,21 +510,26 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Store_generated_values_are_propagated_with_composite_key_cycles()
+    public virtual Task Store_generated_values_are_propagated_with_composite_key_cycles()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var period = new CompositeDependent { Number = 1, Principal = new CompositePrincipal() };
+                var period = new CompositeDependent
+                {
+                    PrincipalId = Fixture.IntSentinel,
+                    Number = 1,
+                    Principal = new CompositePrincipal { Id = Fixture.IntSentinel }
+                };
 
                 context.Add(period);
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id = period.PrincipalId;
             },
-            context => Assert.Equal(1, context.Set<CompositeDependent>().Single(e => e.PrincipalId == id).Number));
+            async context => Assert.Equal(1, (await context.Set<CompositeDependent>().SingleAsync(e => e.PrincipalId == id)).Number));
     }
 
     protected class NonStoreGenDependent
@@ -531,24 +550,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     [ConditionalTheory] // Issue #22027 #14192
     [InlineData(EntityState.Modified)]
     [InlineData(EntityState.Deleted)]
-    public void Change_state_of_entity_with_temp_non_key_does_not_throw(EntityState targetState)
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public Task Change_state_of_entity_with_temp_non_key_does_not_throw(EntityState targetState)
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var dependent = new NonStoreGenDependent { Id = 89, };
+                var dependent = new NonStoreGenDependent { Id = 89 };
 
                 context.Add(dependent);
 
                 Assert.True(context.Entry(dependent).Property(e => e.HasTemp).IsTemporary);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.False(context.Entry(dependent).Property(e => e.HasTemp).IsTemporary);
                 Assert.Equal(777, dependent.HasTemp);
             },
-            context =>
+            async context =>
             {
-                var principal = new StoreGenPrincipal();
+                var principal = new StoreGenPrincipal { Id = Fixture.IntSentinel };
                 var dependent = new NonStoreGenDependent { Id = 89, StoreGenPrincipal = principal };
 
                 context.Add(dependent);
@@ -560,7 +579,7 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 Assert.True(context.Entry(dependent).Property(e => e.HasTemp).IsTemporary);
                 Assert.True(context.Entry(dependent).Property(e => e.StoreGenPrincipalId).IsTemporary);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal(EntityState.Unchanged, context.Entry(principal).State);
 
@@ -574,11 +593,11 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             });
 
     [ConditionalFact] // Issue #19137
-    public void Clearing_optional_FK_does_not_leave_temporary_value()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public Task Clearing_optional_FK_does_not_leave_temporary_value()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var product = new OptionalProduct();
+                var product = new OptionalProduct { Id = Fixture.IntSentinel };
                 context.Add(product);
 
                 Assert.True(context.ChangeTracker.HasChanges());
@@ -586,7 +605,7 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 var productEntry = context.Entry(product);
                 Assert.Equal(EntityState.Added, productEntry.State);
 
-                Assert.Equal(0, product.Id);
+                Assert.Equal(Fixture.IntSentinel, product.Id);
                 Assert.True(productEntry.Property(e => e.Id).CurrentValue < 0);
                 Assert.True(productEntry.Property(e => e.Id).IsTemporary);
 
@@ -594,7 +613,7 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 Assert.Null(productEntry.Property(e => e.CategoryId).CurrentValue);
                 Assert.False(productEntry.Property(e => e.CategoryId).IsTemporary);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.False(context.ChangeTracker.HasChanges());
 
@@ -631,7 +650,7 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 Assert.True(categoryEntry.Property(e => e.Id).CurrentValue < 0);
                 Assert.True(categoryEntry.Property(e => e.Id).IsTemporary);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.False(context.ChangeTracker.HasChanges());
 
@@ -672,7 +691,7 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.True(context.ChangeTracker.HasChanges());
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.False(context.ChangeTracker.HasChanges());
 
@@ -707,89 +726,95 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Added_entity_with_temporary_value_gets_value_from_store_even_if_same()
+    public virtual Task Identity_property_on_Added_entity_with_temporary_value_gets_value_from_store_even_if_same()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entry = context.Add(new Gumball { Identity = "Banana Joe" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.Identity = "Banana Joe";
+                var entry = context.Add(gumball);
                 entry.Property(e => e.Identity).IsTemporary = true;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entry.Entity.Id;
 
                 Assert.Equal("Banana Joe", entry.Entity.Identity);
                 Assert.False(entry.Property(e => e.Identity).IsTemporary);
             },
-            context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).Identity));
+            async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Identity));
     }
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Added_entity_with_default_value_gets_value_from_store()
+    public virtual Task Identity_property_on_Added_entity_with_default_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
 
                 Assert.Equal("Banana Joe", entity.Identity);
             },
-            context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).Identity));
+            async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Identity));
     }
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Identity_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Add(new Gumball { IdentityReadOnlyBeforeSave = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.IdentityReadOnlyBeforeSave = "Masami";
+                context.Add(gumball);
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyBeforeSave("IdentityReadOnlyBeforeSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Added_entity_can_have_value_set_explicitly()
+    public virtual Task Identity_property_on_Added_entity_can_have_value_set_explicitly()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball { Identity = "Masami" }).Entity;
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.Identity = "Masami";
+                var entity = context.Add(gumball).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
 
                 Assert.Equal("Masami", entity.Identity);
             },
-            context => Assert.Equal("Masami", context.Set<Gumball>().Single(e => e.Id == id).Identity));
+            async context => Assert.Equal("Masami", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Identity));
     }
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
+    public virtual Task Identity_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Anton", gumball.IdentityReadOnlyAfterSave);
 
@@ -798,55 +823,55 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyAfterSave("IdentityReadOnlyAfterSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
     }
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Modified_entity_is_included_in_update_when_modified()
+    public virtual Task Identity_property_on_Modified_entity_is_included_in_update_when_modified()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Banana Joe", gumball.Identity);
 
                 gumball.Identity = "Masami";
                 gumball.NotStoreGenerated = "Larry Needlemeye";
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal("Masami", gumball.Identity);
             },
-            context => Assert.Equal("Masami", context.Set<Gumball>().Single(e => e.Id == id).Identity));
+            async context => Assert.Equal("Masami", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Identity));
     }
 
     [ConditionalFact]
-    public virtual void Identity_property_on_Modified_entity_is_not_included_in_update_when_not_modified()
+    public virtual Task Identity_property_on_Modified_entity_is_not_included_in_update_when_not_modified()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Banana Joe", gumball.Identity);
 
@@ -856,78 +881,82 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Entry(gumball).Property(e => e.Identity).OriginalValue = "Masami";
                 context.Entry(gumball).Property(e => e.Identity).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal("Masami", gumball.Identity);
             },
-            context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).Identity));
+            async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Identity));
     }
 
     [ConditionalFact]
-    public virtual void Always_identity_property_on_Added_entity_with_temporary_value_gets_value_from_store()
+    public virtual Task Always_identity_property_on_Added_entity_with_temporary_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entry = context.Add(new Gumball { AlwaysIdentity = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.AlwaysIdentity = "Masami";
+                var entry = context.Add(gumball);
                 entry.Property(e => e.AlwaysIdentity).IsTemporary = true;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entry.Entity.Id;
 
                 Assert.Equal("Banana Joe", entry.Entity.AlwaysIdentity);
             },
-            context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).AlwaysIdentity));
+            async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).AlwaysIdentity));
     }
 
     [ConditionalFact]
-    public virtual void Always_identity_property_on_Added_entity_with_default_value_gets_value_from_store()
+    public virtual Task Always_identity_property_on_Added_entity_with_default_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
 
                 Assert.Equal("Banana Joe", entity.AlwaysIdentity);
             },
-            context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).AlwaysIdentity));
+            async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).AlwaysIdentity));
     }
 
     [ConditionalFact]
-    public virtual void Always_identity_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Always_identity_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Add(new Gumball { AlwaysIdentityReadOnlyBeforeSave = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.AlwaysIdentityReadOnlyBeforeSave = "Masami";
+                context.Add(gumball);
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyBeforeSave("AlwaysIdentityReadOnlyBeforeSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalFact]
-    public virtual void Always_identity_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
+    public virtual Task Always_identity_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Anton", gumball.AlwaysIdentityReadOnlyAfterSave);
 
@@ -936,26 +965,26 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyAfterSave("AlwaysIdentityReadOnlyAfterSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
     }
 
     [ConditionalFact]
-    public virtual void Always_identity_property_on_Modified_entity_is_not_included_in_the_update_when_not_modified()
+    public virtual Task Always_identity_property_on_Modified_entity_is_not_included_in_the_update_when_not_modified()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Banana Joe", gumball.AlwaysIdentity);
 
@@ -965,95 +994,101 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Entry(gumball).Property(e => e.AlwaysIdentity).OriginalValue = "Masami";
                 context.Entry(gumball).Property(e => e.AlwaysIdentity).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal("Masami", gumball.AlwaysIdentity);
-            }, context => Assert.Equal("Banana Joe", context.Set<Gumball>().Single(e => e.Id == id).AlwaysIdentity));
+            }, async context => Assert.Equal("Banana Joe", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).AlwaysIdentity));
     }
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Added_entity_with_temporary_value_gets_value_from_store()
+    public virtual Task Computed_property_on_Added_entity_with_temporary_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entry = context.Add(new Gumball { Computed = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.Computed = "Masami";
+                var entry = context.Add(gumball);
                 entry.Property(e => e.Computed).IsTemporary = true;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entry.Entity.Id;
 
                 Assert.Equal("Alan", entry.Entity.Computed);
             },
-            context => Assert.Equal("Alan", context.Set<Gumball>().Single(e => e.Id == id).Computed));
+            async context => Assert.Equal("Alan", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Computed));
     }
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Added_entity_with_default_value_gets_value_from_store()
+    public virtual Task Computed_property_on_Added_entity_with_default_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
 
                 Assert.Equal("Alan", entity.Computed);
             },
-            context => Assert.Equal("Alan", context.Set<Gumball>().Single(e => e.Id == id).Computed));
+            async context => Assert.Equal("Alan", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Computed));
     }
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Computed_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Add(new Gumball { ComputedReadOnlyBeforeSave = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.ComputedReadOnlyBeforeSave = "Masami";
+                context.Add(gumball);
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyBeforeSave("ComputedReadOnlyBeforeSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Added_entity_can_have_value_set_explicitly()
+    public virtual Task Computed_property_on_Added_entity_can_have_value_set_explicitly()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball { Computed = "Masami" }).Entity;
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.Computed = "Masami";
+                var entity = context.Add(gumball).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
 
                 Assert.Equal("Masami", entity.Computed);
             },
-            context => Assert.Equal("Masami", context.Set<Gumball>().Single(e => e.Id == id).Computed));
+            async context => Assert.Equal("Masami", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Computed));
     }
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
+    public virtual Task Computed_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Tina Rex", gumball.ComputedReadOnlyAfterSave);
 
@@ -1062,55 +1097,55 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyAfterSave("ComputedReadOnlyAfterSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
     }
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Modified_entity_is_included_in_update_when_modified()
+    public virtual Task Computed_property_on_Modified_entity_is_included_in_update_when_modified()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Alan", gumball.Computed);
 
                 gumball.Computed = "Masami";
                 gumball.NotStoreGenerated = "Larry Needlemeye";
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal("Masami", gumball.Computed);
             },
-            context => Assert.Equal("Masami", context.Set<Gumball>().Single(e => e.Id == id).Computed));
+            async context => Assert.Equal("Masami", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Computed));
     }
 
     [ConditionalFact]
-    public virtual void Computed_property_on_Modified_entity_is_read_from_store_when_not_modified()
+    public virtual Task Computed_property_on_Modified_entity_is_read_from_store_when_not_modified()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Alan", gumball.Computed);
 
@@ -1120,78 +1155,82 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Entry(gumball).Property(e => e.Computed).OriginalValue = "Masami";
                 context.Entry(gumball).Property(e => e.Computed).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal("Alan", gumball.Computed);
             },
-            context => Assert.Equal("Alan", context.Set<Gumball>().Single(e => e.Id == id).Computed));
+            async context => Assert.Equal("Alan", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).Computed));
     }
 
     [ConditionalFact]
-    public virtual void Always_computed_property_on_Added_entity_with_temporary_value_gets_value_from_store()
+    public virtual Task Always_computed_property_on_Added_entity_with_temporary_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entry = context.Add(new Gumball { AlwaysComputed = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.AlwaysComputed = "Masami";
+                var entry = context.Add(gumball);
                 entry.Property(e => e.AlwaysComputed).IsTemporary = true;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entry.Entity.Id;
 
                 Assert.Equal("Alan", entry.Entity.AlwaysComputed);
             },
-            context => Assert.Equal("Alan", context.Set<Gumball>().Single(e => e.Id == id).AlwaysComputed));
+            async context => Assert.Equal("Alan", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).AlwaysComputed));
     }
 
     [ConditionalFact]
-    public virtual void Always_computed_property_on_Added_entity_with_default_value_gets_value_from_store()
+    public virtual Task Always_computed_property_on_Added_entity_with_default_value_gets_value_from_store()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
 
                 Assert.Equal("Alan", entity.AlwaysComputed);
             },
-            context => Assert.Equal("Alan", context.Set<Gumball>().Single(e => e.Id == id).AlwaysComputed));
+            async context => Assert.Equal("Alan", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).AlwaysComputed));
     }
 
     [ConditionalFact]
-    public virtual void Always_computed_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Always_computed_property_on_Added_entity_with_read_only_before_save_throws_if_explicit_values_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                context.Add(new Gumball { AlwaysComputedReadOnlyBeforeSave = "Masami" });
+                var gumball = Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel);
+                gumball.AlwaysComputedReadOnlyBeforeSave = "Masami";
+                context.Add(gumball);
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyBeforeSave("AlwaysComputedReadOnlyBeforeSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
 
     [ConditionalFact]
-    public virtual void Always_computed_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
+    public virtual Task Always_computed_property_on_Modified_entity_with_read_only_after_save_throws_if_value_is_in_modified_state()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Tina Rex", gumball.AlwaysComputedReadOnlyAfterSave);
 
@@ -1200,26 +1239,26 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(
                     CoreStrings.PropertyReadOnlyAfterSave("AlwaysComputedReadOnlyAfterSave", "Gumball"),
-                    Assert.Throws<InvalidOperationException>(() => context.SaveChanges()).Message);
+                    (await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync())).Message);
             });
     }
 
     [ConditionalFact]
-    public virtual void Always_computed_property_on_Modified_entity_is_read_from_store_when_not_modified()
+    public virtual Task Always_computed_property_on_Modified_entity_is_read_from_store_when_not_modified()
     {
         var id = 0;
 
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new Gumball()).Entity;
+                var entity = context.Add(Gumball.Create(Fixture.IntSentinel, Fixture.StringSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var gumball = context.Set<Gumball>().Single(e => e.Id == id);
+                var gumball = await context.Set<Gumball>().SingleAsync(e => e.Id == id);
 
                 Assert.Equal("Alan", gumball.AlwaysComputed);
 
@@ -1229,41 +1268,42 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Entry(gumball).Property(e => e.AlwaysComputed).OriginalValue = "Masami";
                 context.Entry(gumball).Property(e => e.AlwaysComputed).IsModified = false;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.Equal("Alan", gumball.AlwaysComputed);
             },
-            context => Assert.Equal("Alan", context.Set<Gumball>().Single(e => e.Id == id).AlwaysComputed));
+            async context => Assert.Equal("Alan", (await context.Set<Gumball>().SingleAsync(e => e.Id == id)).AlwaysComputed));
     }
 
     [ConditionalFact]
-    public virtual void Fields_used_correctly_for_store_generated_values()
+    public virtual Task Fields_used_correctly_for_store_generated_values()
     {
         var id = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new WithBackingFields()).Entity;
+                var entity = context.Add(WithBackingFields.Create(Fixture.IntSentinel, Fixture.NullableIntSentinel)).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
                 id = entity.Id;
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithBackingFields>().Single(e => e.Id.Equals(id));
+                var entity = await context.Set<WithBackingFields>().SingleAsync(e => e.Id.Equals(id));
                 Assert.Equal(1, entity.NullableAsNonNullable);
                 Assert.Equal(1, entity.NonNullableAsNullable);
             });
     }
 
     [ConditionalFact]
-    public virtual void Nullable_fields_get_defaults_when_not_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Nullable_fields_get_defaults_when_not_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new WithNullableBackingFields()).Entity;
+                var entity = context.Add(WithNullableBackingFields.Create(Fixture.NullableIntSentinel, Fixture.NullableBoolSentinel))
+                    .Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.NotEqual(0, entity.Id);
                 Assert.True(entity.NullableBackedBoolTrueDefault);
@@ -1271,9 +1311,9 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 Assert.False(entity.NullableBackedBoolFalseDefault);
                 Assert.Equal(0, entity.NullableBackedIntZeroDefault);
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithNullableBackingFields>().Single();
+                var entity = await context.Set<WithNullableBackingFields>().SingleAsync();
                 Assert.True(entity.NullableBackedBoolTrueDefault);
                 Assert.Equal(-1, entity.NullableBackedIntNonZeroDefault);
                 Assert.False(entity.NullableBackedBoolFalseDefault);
@@ -1281,75 +1321,140 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             });
 
     [ConditionalFact]
-    public virtual void Nullable_fields_store_non_defaults_when_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Properties_get_database_defaults_when_set_to_sentinel_values()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(
-                    new WithNullableBackingFields
-                    {
-                        NullableBackedBoolTrueDefault = false,
-                        NullableBackedIntNonZeroDefault = 0,
-                        NullableBackedBoolFalseDefault = true,
-                        NullableBackedIntZeroDefault = -1
-                    }).Entity;
+                var entity = new WithNoBackingFields
+                {
+                    Id = Fixture.IntSentinel,
+                    TrueDefault = true, // Bool sentinel is always true by convention when default value is true
+                    NonZeroDefault = Fixture.IntSentinel,
+                    FalseDefault = Fixture.BoolSentinel,
+                    ZeroDefault = Fixture.IntSentinel
+                };
 
-                context.SaveChanges();
+                context.Add(entity);
+
+                await context.SaveChangesAsync();
 
                 Assert.NotEqual(0, entity.Id);
-                Assert.False(entity.NullableBackedBoolTrueDefault);
-                Assert.Equal(0, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
-                Assert.Equal(-1, entity.NullableBackedIntZeroDefault);
+                Assert.True(entity.TrueDefault);
+                Assert.Equal(-1, entity.NonZeroDefault);
+                Assert.False(entity.FalseDefault);
+                Assert.Equal(0, entity.ZeroDefault);
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithNullableBackingFields>().Single();
-                Assert.False(entity.NullableBackedBoolTrueDefault);
-                Assert.Equal(0, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
-                Assert.Equal(-1, entity.NullableBackedIntZeroDefault);
+                var entity = await context.Set<WithNoBackingFields>().SingleAsync();
+                Assert.True(entity.TrueDefault);
+                Assert.Equal(-1, entity.NonZeroDefault);
+                Assert.False(entity.FalseDefault);
+                Assert.Equal(0, entity.ZeroDefault);
             });
 
     [ConditionalFact]
-    public virtual void Nullable_fields_store_any_value_when_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Properties_get_set_values_when_not_set_to_sentinel_values()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(
-                    new WithNullableBackingFields
-                    {
-                        NullableBackedBoolTrueDefault = true,
-                        NullableBackedIntNonZeroDefault = 3,
-                        NullableBackedBoolFalseDefault = true,
-                        NullableBackedIntZeroDefault = 5
-                    }).Entity;
+                var entity = new WithNoBackingFields
+                {
+                    Id = Fixture.IntSentinel,
+                    TrueDefault = false, // Bool sentinel is always true by convention when default value is true
+                    NonZeroDefault = 3,
+                    FalseDefault = !Fixture.BoolSentinel,
+                    ZeroDefault = 5
+                };
 
-                context.SaveChanges();
+                context.Add(entity);
+
+                await context.SaveChangesAsync();
 
                 Assert.NotEqual(0, entity.Id);
-                Assert.True(entity.NullableBackedBoolTrueDefault);
+                Assert.False(entity.TrueDefault);
+                Assert.Equal(3, entity.NonZeroDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.FalseDefault);
+                Assert.Equal(5, entity.ZeroDefault);
+            },
+            async context =>
+            {
+                var entity = await context.Set<WithNoBackingFields>().SingleAsync();
+                Assert.False(entity.TrueDefault);
+                Assert.Equal(3, entity.NonZeroDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.FalseDefault);
+                Assert.Equal(5, entity.ZeroDefault);
+            });
+
+    [ConditionalFact]
+    public virtual Task Nullable_fields_store_non_defaults_when_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = WithNullableBackingFields.Create(Fixture.NullableIntSentinel, Fixture.NullableBoolSentinel);
+                entity.NullableBackedBoolTrueDefault = Fixture.BoolSentinel;
+                entity.NullableBackedIntNonZeroDefault = Fixture.IntSentinel;
+                entity.NullableBackedBoolFalseDefault = !Fixture.BoolSentinel;
+                entity.NullableBackedIntZeroDefault = Fixture.IntSentinel + 1;
+
+                context.Add(entity);
+
+                await context.SaveChangesAsync();
+
+                Assert.NotEqual(0, entity.Id);
+                Assert.Equal(Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
+                Assert.Equal(Fixture.IntSentinel, entity.NullableBackedIntNonZeroDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(Fixture.IntSentinel + 1, entity.NullableBackedIntZeroDefault);
+            },
+            async context =>
+            {
+                var entity = await context.Set<WithNullableBackingFields>().SingleAsync();
+                Assert.Equal(Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
+                Assert.Equal(Fixture.IntSentinel, entity.NullableBackedIntNonZeroDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(Fixture.IntSentinel + 1, entity.NullableBackedIntZeroDefault);
+            });
+
+    [ConditionalFact]
+    public virtual Task Nullable_fields_store_any_value_when_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var entity = WithNullableBackingFields.Create(Fixture.NullableIntSentinel, Fixture.NullableBoolSentinel);
+                entity.NullableBackedBoolTrueDefault = !Fixture.BoolSentinel;
+                entity.NullableBackedIntNonZeroDefault = 3;
+                entity.NullableBackedBoolFalseDefault = !Fixture.BoolSentinel;
+                entity.NullableBackedIntZeroDefault = 5;
+
+                context.Add(entity);
+
+                await context.SaveChangesAsync();
+
+                Assert.NotEqual(0, entity.Id);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
                 Assert.Equal(3, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
                 Assert.Equal(5, entity.NullableBackedIntZeroDefault);
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithNullableBackingFields>().Single();
-                Assert.True(entity.NullableBackedBoolTrueDefault);
+                var entity = await context.Set<WithNullableBackingFields>().SingleAsync();
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
                 Assert.Equal(3, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
                 Assert.Equal(5, entity.NullableBackedIntZeroDefault);
             });
 
     [ConditionalFact]
-    public virtual void Object_fields_get_defaults_when_not_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Object_fields_get_defaults_when_not_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(new WithObjectBackingFields()).Entity;
+                var entity = WithObjectBackingFields.Create(Fixture.NullableIntSentinel, Fixture.NullableBoolSentinel);
+                context.Add(entity);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 Assert.NotEqual(0, entity.Id);
                 Assert.True(entity.NullableBackedBoolTrueDefault);
@@ -1357,9 +1462,9 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 Assert.False(entity.NullableBackedBoolFalseDefault);
                 Assert.Equal(0, entity.NullableBackedIntZeroDefault);
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithObjectBackingFields>().Single();
+                var entity = await context.Set<WithObjectBackingFields>().SingleAsync();
                 Assert.True(entity.NullableBackedBoolTrueDefault);
                 Assert.Equal(-1, entity.NullableBackedIntNonZeroDefault);
                 Assert.False(entity.NullableBackedBoolFalseDefault);
@@ -1367,64 +1472,62 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             });
 
     [ConditionalFact]
-    public virtual void Object_fields_store_non_defaults_when_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Object_fields_store_non_defaults_when_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(
-                    new WithObjectBackingFields
-                    {
-                        NullableBackedBoolTrueDefault = false,
-                        NullableBackedIntNonZeroDefault = 0,
-                        NullableBackedBoolFalseDefault = true,
-                        NullableBackedIntZeroDefault = -1
-                    }).Entity;
+                var entity = WithObjectBackingFields.Create(Fixture.NullableIntSentinel, Fixture.NullableBoolSentinel);
+                entity.NullableBackedBoolTrueDefault = Fixture.BoolSentinel;
+                entity.NullableBackedIntNonZeroDefault = Fixture.IntSentinel;
+                entity.NullableBackedBoolFalseDefault = !Fixture.BoolSentinel;
+                entity.NullableBackedIntZeroDefault = Fixture.IntSentinel + 1;
 
-                context.SaveChanges();
+                context.Add(entity);
+
+                await context.SaveChangesAsync();
 
                 Assert.NotEqual(0, entity.Id);
-                Assert.False(entity.NullableBackedBoolTrueDefault);
-                Assert.Equal(0, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
-                Assert.Equal(-1, entity.NullableBackedIntZeroDefault);
+                Assert.Equal(Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
+                Assert.Equal(Fixture.IntSentinel, entity.NullableBackedIntNonZeroDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(Fixture.IntSentinel + 1, entity.NullableBackedIntZeroDefault);
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithObjectBackingFields>().Single();
-                Assert.False(entity.NullableBackedBoolTrueDefault);
-                Assert.Equal(0, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
-                Assert.Equal(-1, entity.NullableBackedIntZeroDefault);
+                var entity = await context.Set<WithObjectBackingFields>().SingleAsync();
+                Assert.Equal(Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
+                Assert.Equal(Fixture.IntSentinel, entity.NullableBackedIntNonZeroDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(Fixture.IntSentinel + 1, entity.NullableBackedIntZeroDefault);
             });
 
     [ConditionalFact]
-    public virtual void Object_fields_store_any_value_when_set()
-        => ExecuteWithStrategyInTransaction(
-            context =>
+    public virtual Task Object_fields_store_any_value_when_set()
+        => ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
-                var entity = context.Add(
-                    new WithObjectBackingFields
-                    {
-                        NullableBackedBoolTrueDefault = true,
-                        NullableBackedIntNonZeroDefault = 3,
-                        NullableBackedBoolFalseDefault = true,
-                        NullableBackedIntZeroDefault = 5
-                    }).Entity;
+                var entity = WithObjectBackingFields.Create(Fixture.NullableIntSentinel, Fixture.NullableBoolSentinel);
+                entity.NullableBackedBoolTrueDefault = !Fixture.BoolSentinel;
+                entity.NullableBackedIntNonZeroDefault = 3;
+                entity.NullableBackedBoolFalseDefault = !Fixture.BoolSentinel;
+                entity.NullableBackedIntZeroDefault = 5;
 
-                context.SaveChanges();
+                context.Add(entity);
+
+                await context.SaveChangesAsync();
 
                 Assert.NotEqual(0, entity.Id);
-                Assert.True(entity.NullableBackedBoolTrueDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
                 Assert.Equal(3, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
                 Assert.Equal(5, entity.NullableBackedIntZeroDefault);
             },
-            context =>
+            async context =>
             {
-                var entity = context.Set<WithObjectBackingFields>().Single();
-                Assert.True(entity.NullableBackedBoolTrueDefault);
+                var entity = await context.Set<WithObjectBackingFields>().SingleAsync();
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolTrueDefault);
                 Assert.Equal(3, entity.NullableBackedIntNonZeroDefault);
-                Assert.True(entity.NullableBackedBoolFalseDefault);
+                Assert.Equal(!Fixture.BoolSentinel, entity.NullableBackedBoolFalseDefault);
                 Assert.Equal(5, entity.NullableBackedIntZeroDefault);
             });
 
@@ -1455,6 +1558,29 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
     protected class Gumball
     {
+        public static Gumball Create(int intSentinel, string? stringSentinel)
+            => new()
+            {
+                Id = intSentinel,
+                NotStoreGenerated = stringSentinel,
+                Identity = stringSentinel,
+                IdentityReadOnlyBeforeSave = stringSentinel,
+                IdentityReadOnlyAfterSave = stringSentinel,
+                AlwaysIdentity = stringSentinel,
+                AlwaysIdentityReadOnlyBeforeSave = stringSentinel,
+                AlwaysIdentityReadOnlyAfterSave = stringSentinel,
+                Computed = stringSentinel,
+                ComputedReadOnlyBeforeSave = stringSentinel,
+                ComputedReadOnlyAfterSave = stringSentinel,
+                AlwaysComputed = stringSentinel,
+                AlwaysComputedReadOnlyBeforeSave = stringSentinel,
+                AlwaysComputedReadOnlyAfterSave = stringSentinel
+            };
+
+        private Gumball()
+        {
+        }
+
         public int Id { get; set; }
         public string? NotStoreGenerated { get; set; }
 
@@ -1477,6 +1603,56 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
     protected class Anais
     {
+        public static Anais Create(int intSentinel, string? stringSentinel)
+            => new()
+            {
+                Id = intSentinel,
+                Never = stringSentinel,
+                NeverUseBeforeUseAfter = stringSentinel,
+                NeverIgnoreBeforeUseAfter = stringSentinel,
+                NeverThrowBeforeUseAfter = stringSentinel,
+                NeverUseBeforeIgnoreAfter = stringSentinel,
+                NeverIgnoreBeforeIgnoreAfter = stringSentinel,
+                NeverThrowBeforeIgnoreAfter = stringSentinel,
+                NeverUseBeforeThrowAfter = stringSentinel,
+                NeverIgnoreBeforeThrowAfter = stringSentinel,
+                NeverThrowBeforeThrowAfter = stringSentinel,
+                OnAdd = stringSentinel,
+                OnAddUseBeforeUseAfter = stringSentinel,
+                OnAddIgnoreBeforeUseAfter = stringSentinel,
+                OnAddThrowBeforeUseAfter = stringSentinel,
+                OnAddUseBeforeIgnoreAfter = stringSentinel,
+                OnAddIgnoreBeforeIgnoreAfter = stringSentinel,
+                OnAddThrowBeforeIgnoreAfter = stringSentinel,
+                OnAddUseBeforeThrowAfter = stringSentinel,
+                OnAddIgnoreBeforeThrowAfter = stringSentinel,
+                OnAddThrowBeforeThrowAfter = stringSentinel,
+                OnAddOrUpdate = stringSentinel,
+                OnAddOrUpdateUseBeforeUseAfter = stringSentinel,
+                OnAddOrUpdateIgnoreBeforeUseAfter = stringSentinel,
+                OnAddOrUpdateThrowBeforeUseAfter = stringSentinel,
+                OnAddOrUpdateUseBeforeIgnoreAfter = stringSentinel,
+                OnAddOrUpdateIgnoreBeforeIgnoreAfter = stringSentinel,
+                OnAddOrUpdateThrowBeforeIgnoreAfter = stringSentinel,
+                OnAddOrUpdateUseBeforeThrowAfter = stringSentinel,
+                OnAddOrUpdateIgnoreBeforeThrowAfter = stringSentinel,
+                OnAddOrUpdateThrowBeforeThrowAfter = stringSentinel,
+                OnUpdate = stringSentinel,
+                OnUpdateUseBeforeUseAfter = stringSentinel,
+                OnUpdateIgnoreBeforeUseAfter = stringSentinel,
+                OnUpdateThrowBeforeUseAfter = stringSentinel,
+                OnUpdateUseBeforeIgnoreAfter = stringSentinel,
+                OnUpdateIgnoreBeforeIgnoreAfter = stringSentinel,
+                OnUpdateThrowBeforeIgnoreAfter = stringSentinel,
+                OnUpdateUseBeforeThrowAfter = stringSentinel,
+                OnUpdateIgnoreBeforeThrowAfter = stringSentinel,
+                OnUpdateThrowBeforeThrowAfter = stringSentinel,
+            };
+
+        private Anais()
+        {
+        }
+
         public int Id { get; set; }
         public string? Never { get; set; }
         public string? NeverUseBeforeUseAfter { get; set; }
@@ -1525,6 +1701,19 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
     protected class WithBackingFields
     {
+        public static WithBackingFields Create(int intSentinel, int? nullableIntSentinel)
+        {
+            var entity = new WithBackingFields();
+            entity._id = intSentinel;
+            entity._nullableAsNonNullable = nullableIntSentinel;
+            entity._nonNullableAsNullable = intSentinel;
+            return entity;
+        }
+
+        private WithBackingFields()
+        {
+        }
+
 #pragma warning disable RCS1085 // Use auto-implemented property.
         // ReSharper disable ConvertToAutoProperty
         private int _id;
@@ -1554,8 +1743,32 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
         }
     }
 
+    protected class WithNoBackingFields
+    {
+        public int Id { get; set; }
+        public bool TrueDefault { get; set; }
+        public int NonZeroDefault { get; set; }
+        public bool FalseDefault { get; set; }
+        public int ZeroDefault { get; set; }
+    }
+
     protected class WithNullableBackingFields
     {
+        public static WithNullableBackingFields Create(int? intSentinel, bool? boolSentinel)
+        {
+            var entity = new WithNullableBackingFields();
+            entity._id = intSentinel;
+            entity._nullableBackedBoolTrueDefault = boolSentinel;
+            entity._nullableBackedIntNonZeroDefault = intSentinel;
+            entity._nullableBackedBoolFalseDefault = boolSentinel;
+            entity._nullableBackedIntZeroDefault = intSentinel;
+            return entity;
+        }
+
+        private WithNullableBackingFields()
+        {
+        }
+
         private int? _id;
 
         public int Id
@@ -1599,6 +1812,21 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
     protected class WithObjectBackingFields
     {
+        public static WithObjectBackingFields Create(int? intSentinel, bool? boolSentinel)
+        {
+            var entity = new WithObjectBackingFields();
+            entity._id = intSentinel;
+            entity._nullableBackedBoolTrueDefault = boolSentinel;
+            entity._nullableBackedIntNonZeroDefault = intSentinel;
+            entity._nullableBackedBoolFalseDefault = boolSentinel;
+            entity._nullableBackedIntZeroDefault = intSentinel;
+            return entity;
+        }
+
+        private WithObjectBackingFields()
+        {
+        }
+
         private object? _id;
 
         public int Id
@@ -1645,47 +1873,27 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
         public TKey? Id { get; set; }
     }
 
-    protected class IntToString : WithConverter<int>
-    {
-    }
+    protected class IntToString : WithConverter<int>;
 
-    protected class GuidToString : WithConverter<Guid>
-    {
-    }
+    protected class GuidToString : WithConverter<Guid>;
 
-    protected class GuidToBytes : WithConverter<Guid>
-    {
-    }
+    protected class GuidToBytes : WithConverter<Guid>;
 
-    protected class ShortToBytes : WithConverter<short>
-    {
-    }
+    protected class ShortToBytes : WithConverter<short>;
 
-    protected class WrappedIntClass
+    public class WrappedIntClass
     {
         public int Value { get; set; }
     }
 
-    protected class WrappedIntClassConverter : ValueConverter<WrappedIntClass, int>
-    {
-        public WrappedIntClassConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedIntClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedIntClassConverter() : ValueConverter<WrappedIntClass, int>(
+        v => v.Value,
+        v => new WrappedIntClass { Value = v });
 
-    protected class WrappedIntClassComparer : ValueComparer<WrappedIntClass?>
-    {
-        public WrappedIntClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
-                v => v != null ? v.Value : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedIntClassComparer() : ValueComparer<WrappedIntClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
+        v => v != null ? v.Value : 0,
+        v => v == null ? null : new WrappedIntClass { Value = v.Value });
 
     protected class WrappedIntClassValueGenerator : ValueGenerator<WrappedIntClass>
     {
@@ -1696,20 +1904,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected struct WrappedIntStruct
+    public struct WrappedIntStruct
     {
         public int Value { get; set; }
     }
 
-    protected class WrappedIntStructConverter : ValueConverter<WrappedIntStruct, int>
-    {
-        public WrappedIntStructConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedIntStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedIntStructConverter() : ValueConverter<WrappedIntStruct, int>(
+        v => v.Value,
+        v => new WrappedIntStruct { Value = v });
 
     protected class WrappedIntStructValueGenerator : ValueGenerator<WrappedIntStruct>
     {
@@ -1720,20 +1922,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected record WrappedIntRecord
+    public record WrappedIntRecord
     {
         public int Value { get; set; }
     }
 
-    protected class WrappedIntRecordConverter : ValueConverter<WrappedIntRecord, int>
-    {
-        public WrappedIntRecordConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedIntRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedIntRecordConverter() : ValueConverter<WrappedIntRecord, int>(
+        v => v.Value,
+        v => new WrappedIntRecord { Value = v });
 
     protected class WrappedIntRecordValueGenerator : ValueGenerator<WrappedIntRecord>
     {
@@ -1744,33 +1940,21 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected class WrappedIntKeyClass
+    public class WrappedIntKeyClass
     {
         public int Value { get; set; }
     }
 
-    protected class WrappedIntKeyClassConverter : ValueConverter<WrappedIntKeyClass, int>
-    {
-        public WrappedIntKeyClassConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedIntKeyClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedIntKeyClassConverter() : ValueConverter<WrappedIntKeyClass, int>(
+        v => v.Value,
+        v => new WrappedIntKeyClass { Value = v });
 
-    protected class WrappedIntKeyClassComparer : ValueComparer<WrappedIntKeyClass?>
-    {
-        public WrappedIntKeyClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
-                v => v != null ? v.Value : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedIntKeyClassComparer() : ValueComparer<WrappedIntKeyClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
+        v => v != null ? v.Value : 0,
+        v => v == null ? null : new WrappedIntKeyClass { Value = v.Value });
 
-    protected struct WrappedIntKeyStruct
+    public struct WrappedIntKeyStruct
     {
         public int Value { get; set; }
 
@@ -1787,30 +1971,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => !left.Equals(right);
     }
 
-    protected class WrappedIntKeyStructConverter : ValueConverter<WrappedIntKeyStruct, int>
-    {
-        public WrappedIntKeyStructConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedIntKeyStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedIntKeyStructConverter() : ValueConverter<WrappedIntKeyStruct, int>(
+        v => v.Value,
+        v => new WrappedIntKeyStruct { Value = v });
 
-    protected record WrappedIntKeyRecord
+    public record WrappedIntKeyRecord
     {
         public int Value { get; set; }
     }
 
-    protected class WrappedIntKeyRecordConverter : ValueConverter<WrappedIntKeyRecord, int>
-    {
-        public WrappedIntKeyRecordConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedIntKeyRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedIntKeyRecordConverter() : ValueConverter<WrappedIntKeyRecord, int>(
+        v => v.Value,
+        v => new WrappedIntKeyRecord { Value = v });
 
     protected class WrappedIntClassPrincipal
     {
@@ -1924,39 +2096,45 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_wrapped_int_key()
+    public virtual Task Insert_update_and_delete_with_wrapped_int_key()
     {
         var id1 = 0;
         var id2 = 0;
         var id3 = 0;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new WrappedIntClassPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedIntKeyClassSentinel!,
+                        NonKey = Fixture.WrappedIntClassSentinel,
+                        Dependents = { new WrappedIntClassDependentShadow(), new WrappedIntClassDependentShadow() },
+                        OptionalDependents = { new WrappedIntClassDependentOptional(), new WrappedIntClassDependentOptional() },
+                        RequiredDependents = { new WrappedIntClassDependentRequired(), new WrappedIntClassDependentRequired() }
                     }).Entity;
 
                 var principal2 = context.Add(
                     new WrappedIntStructPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedIntKeyStructSentinel,
+                        NonKey = Fixture.WrappedIntStructSentinel,
+                        Dependents = { new WrappedIntStructDependentShadow(), new WrappedIntStructDependentShadow() },
+                        OptionalDependents = { new WrappedIntStructDependentOptional(), new WrappedIntStructDependentOptional() },
+                        RequiredDependents = { new WrappedIntStructDependentRequired(), new WrappedIntStructDependentRequired() }
                     }).Entity;
 
                 var principal3 = context.Add(
                     new WrappedIntRecordPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedIntKeyRecordSentinel!,
+                        NonKey = Fixture.WrappedIntRecordSentinel,
+                        Dependents = { new WrappedIntRecordDependentShadow(), new WrappedIntRecordDependentShadow() },
+                        OptionalDependents = { new WrappedIntRecordDependentOptional(), new WrappedIntRecordDependentOptional() },
+                        RequiredDependents = { new WrappedIntRecordDependentRequired(), new WrappedIntRecordDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id.Value;
                 Assert.NotEqual(0, id1);
@@ -1966,12 +2144,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedIntKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.NotEqual(0, dependent.Id.Value);
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.NotEqual(0, dependent.Id.Value);
@@ -1989,12 +2169,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedIntKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.NotEqual(0, dependent.Id.Value);
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.NotEqual(0, dependent.Id.Value);
@@ -2012,12 +2194,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedIntKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.NotEqual(0, dependent.Id.Value);
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.NotEqual(0, dependent.Id.Value);
@@ -2027,13 +2211,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(66, principal3.NonKey!.Value);
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<WrappedIntClassPrincipal>()
+                var principal1 = await context.Set<WrappedIntClassPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id.Value, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -2041,22 +2225,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedIntKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId.Value);
                 }
 
-                var principal2 = context.Set<WrappedIntStructPrincipal>()
+                var principal2 = await context.Set<WrappedIntStructPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal2.Id.Value, id2);
                 foreach (var dependent in principal2.Dependents)
@@ -2064,22 +2250,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedIntKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId.Value);
                 }
 
-                var principal3 = context.Set<WrappedIntRecordPrincipal>()
+                var principal3 = await context.Set<WrappedIntRecordPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal3.Id.Value, id3);
                 foreach (var dependent in principal3.Dependents)
@@ -2087,11 +2275,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedIntKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
@@ -2110,48 +2300,48 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal2.RequiredDependents.Remove(principal2.RequiredDependents.First());
                 principal3.RequiredDependents.Remove(principal3.RequiredDependents.First());
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<WrappedIntClassDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<WrappedIntClassDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(
                     context.Entry(dependents1.Single(e => e.Principal == null))
                         .Property<WrappedIntKeyClass?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<WrappedIntClassDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<WrappedIntClassDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<WrappedIntClassDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<WrappedIntClassDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
-                var dependents2 = context.Set<WrappedIntStructDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents2 = await context.Set<WrappedIntStructDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents2.Count);
                 Assert.Null(
                     context.Entry(dependents2.Single(e => e.Principal == null))
                         .Property<WrappedIntKeyStruct?>("PrincipalId").CurrentValue);
 
-                var optionalDependents2 = context.Set<WrappedIntStructDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents2 = await context.Set<WrappedIntStructDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents2.Count);
                 Assert.Null(optionalDependents2.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents2 = context.Set<WrappedIntStructDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents2.Count);
+                var requiredDependents2 = await context.Set<WrappedIntStructDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents2);
 
-                var dependents3 = context.Set<WrappedIntRecordDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents3 = await context.Set<WrappedIntRecordDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents3.Count);
                 Assert.Null(
                     context.Entry(dependents3.Single(e => e.Principal == null))
                         .Property<WrappedIntKeyRecord?>("PrincipalId").CurrentValue);
 
-                var optionalDependents3 = context.Set<WrappedIntRecordDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents3 = await context.Set<WrappedIntRecordDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents3.Count);
                 Assert.Null(optionalDependents3.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents3 = context.Set<WrappedIntRecordDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents3.Count);
+                var requiredDependents3 = await context.Set<WrappedIntRecordDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents3);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
@@ -2168,49 +2358,177 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Remove(requiredDependents3.Single());
                 context.Remove(requiredDependents3.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<WrappedIntClassDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedIntStructDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedIntRecordDependentShadow>().Count());
+                Assert.Equal(1, await context.Set<WrappedIntClassDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedIntStructDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedIntRecordDependentShadow>().CountAsync());
 
-                Assert.Equal(1, context.Set<WrappedIntClassDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedIntStructDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedIntRecordDependentOptional>().Count());
+                Assert.Equal(1, await context.Set<WrappedIntClassDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedIntStructDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedIntRecordDependentOptional>().CountAsync());
 
-                Assert.Equal(0, context.Set<WrappedIntClassDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedIntStructDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedIntRecordDependentRequired>().Count());
+                Assert.Equal(0, await context.Set<WrappedIntClassDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedIntStructDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedIntRecordDependentRequired>().CountAsync());
             });
     }
 
-    protected class WrappedStringClass
+    protected class LongToIntPrincipal
+    {
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public long Id { get; set; }
+
+        public ICollection<LongToIntDependentShadow> Dependents { get; } = new List<LongToIntDependentShadow>();
+        public ICollection<LongToIntDependentRequired> RequiredDependents { get; } = new List<LongToIntDependentRequired>();
+        public ICollection<LongToIntDependentOptional> OptionalDependents { get; } = new List<LongToIntDependentOptional>();
+    }
+
+    protected class LongToIntDependentShadow
+    {
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public long Id { get; set; }
+
+        public LongToIntPrincipal? Principal { get; set; }
+    }
+
+    protected class LongToIntDependentRequired
+    {
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public long Id { get; set; }
+
+        public long PrincipalId { get; set; }
+        public LongToIntPrincipal Principal { get; set; } = null!;
+    }
+
+    protected class LongToIntDependentOptional
+    {
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public long Id { get; set; }
+
+        public long? PrincipalId { get; set; }
+        public LongToIntPrincipal? Principal { get; set; }
+    }
+
+    [ConditionalFact]
+    public virtual Task Insert_update_and_delete_with_long_to_int_conversion()
+    {
+        var id1 = 0L;
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
+            {
+                var principal1 = context.Add(
+                    new LongToIntPrincipal
+                    {
+                        Id = Fixture.LongSentinel,
+                        Dependents = { new LongToIntDependentShadow(), new LongToIntDependentShadow() },
+                        OptionalDependents = { new LongToIntDependentOptional(), new LongToIntDependentOptional() },
+                        RequiredDependents = { new LongToIntDependentRequired(), new LongToIntDependentRequired() }
+                    }).Entity;
+
+                await context.SaveChangesAsync();
+
+                id1 = principal1.Id;
+                Assert.NotEqual(0L, id1);
+                foreach (var dependent in principal1.Dependents)
+                {
+                    Assert.NotEqual(0L, dependent.Id);
+                    Assert.Same(principal1, dependent.Principal);
+                    Assert.Equal(id1, context.Entry(dependent).Property<long?>("PrincipalId").CurrentValue!.Value);
+                }
+
+                foreach (var dependent in principal1.OptionalDependents)
+                {
+                    Assert.NotEqual(0L, dependent.Id);
+                    Assert.Same(principal1, dependent.Principal);
+                    Assert.Equal(id1, dependent.PrincipalId);
+                }
+
+                foreach (var dependent in principal1.RequiredDependents)
+                {
+                    Assert.NotEqual(0L, dependent.Id);
+                    Assert.Same(principal1, dependent.Principal);
+                    Assert.Equal(id1, dependent.PrincipalId);
+                }
+            },
+            async context =>
+            {
+                var principal1 = await context.Set<LongToIntPrincipal>()
+                    .Include(e => e.Dependents)
+                    .Include(e => e.OptionalDependents)
+                    .Include(e => e.RequiredDependents)
+                    .SingleAsync();
+
+                Assert.Equal(principal1.Id, id1);
+                foreach (var dependent in principal1.Dependents)
+                {
+                    Assert.Same(principal1, dependent.Principal);
+                    Assert.Equal(id1, context.Entry(dependent).Property<long?>("PrincipalId").CurrentValue!.Value);
+                }
+
+                foreach (var dependent in principal1.OptionalDependents)
+                {
+                    Assert.Same(principal1, dependent.Principal);
+                    Assert.Equal(id1, dependent.PrincipalId!.Value);
+                }
+
+                foreach (var dependent in principal1.RequiredDependents)
+                {
+                    Assert.Same(principal1, dependent.Principal);
+                    Assert.Equal(id1, dependent.PrincipalId);
+                }
+
+                principal1.Dependents.Remove(principal1.Dependents.First());
+                principal1.OptionalDependents.Remove(principal1.OptionalDependents.First());
+                principal1.RequiredDependents.Remove(principal1.RequiredDependents.First());
+
+                await context.SaveChangesAsync();
+            },
+            async context =>
+            {
+                var dependents1 = await context.Set<LongToIntDependentShadow>().Include(e => e.Principal).ToListAsync();
+                Assert.Equal(2, dependents1.Count);
+                Assert.Null(
+                    context.Entry(dependents1.Single(e => e.Principal == null))
+                        .Property<long?>("PrincipalId").CurrentValue);
+
+                var optionalDependents1 = await context.Set<LongToIntDependentOptional>().Include(e => e.Principal).ToListAsync();
+                Assert.Equal(2, optionalDependents1.Count);
+                Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
+
+                var requiredDependents1 = await context.Set<LongToIntDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
+
+                context.Remove(dependents1.Single(e => e.Principal != null));
+                context.Remove(optionalDependents1.Single(e => e.Principal != null));
+                context.Remove(requiredDependents1.Single());
+                context.Remove(requiredDependents1.Single().Principal);
+
+                await context.SaveChangesAsync();
+            },
+            async context =>
+            {
+                Assert.Equal(1, await context.Set<LongToIntDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<LongToIntDependentOptional>().CountAsync());
+                Assert.Equal(0, await context.Set<LongToIntDependentRequired>().CountAsync());
+            });
+    }
+
+    public class WrappedStringClass
     {
         public string? Value { get; set; }
     }
 
-    protected class WrappedStringClassConverter : ValueConverter<WrappedStringClass, string>
-    {
-        public WrappedStringClassConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedStringClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedStringClassConverter() : ValueConverter<WrappedStringClass, string>(
+        v => v.Value!,
+        v => new WrappedStringClass { Value = v });
 
-    protected class WrappedStringClassComparer : ValueComparer<WrappedStringClass?>
-    {
-        public WrappedStringClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
-                v => v != null ? v.Value!.GetHashCode() : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedStringClassComparer() : ValueComparer<WrappedStringClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
+        v => v != null ? v.Value!.GetHashCode() : 0,
+        v => v == null ? null : new WrappedStringClass { Value = v.Value });
 
     protected class WrappedStringClassValueGenerator : ValueGenerator<WrappedStringClass>
     {
@@ -2221,20 +2539,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected struct WrappedStringStruct
+    public struct WrappedStringStruct
     {
         public string? Value { get; set; }
     }
 
-    protected class WrappedStringStructConverter : ValueConverter<WrappedStringStruct, string>
-    {
-        public WrappedStringStructConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedStringStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedStringStructConverter() : ValueConverter<WrappedStringStruct, string>(
+        v => v.Value!,
+        v => new WrappedStringStruct { Value = v });
 
     protected class WrappedStringStructValueGenerator : ValueGenerator<WrappedStringStruct>
     {
@@ -2245,20 +2557,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected record WrappedStringRecord
+    public record WrappedStringRecord
     {
         public string? Value { get; set; }
     }
 
-    protected class WrappedStringRecordConverter : ValueConverter<WrappedStringRecord, string>
-    {
-        public WrappedStringRecordConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedStringRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedStringRecordConverter() : ValueConverter<WrappedStringRecord, string>(
+        v => v.Value!,
+        v => new WrappedStringRecord { Value = v });
 
     protected class WrappedStringRecordValueGenerator : ValueGenerator<WrappedStringRecord>
     {
@@ -2269,33 +2575,21 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected class WrappedStringKeyClass
+    public class WrappedStringKeyClass
     {
         public string? Value { get; set; }
     }
 
-    protected class WrappedStringKeyClassConverter : ValueConverter<WrappedStringKeyClass, string>
-    {
-        public WrappedStringKeyClassConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedStringKeyClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedStringKeyClassConverter() : ValueConverter<WrappedStringKeyClass, string>(
+        v => v.Value!,
+        v => new WrappedStringKeyClass { Value = v });
 
-    protected class WrappedStringKeyClassComparer : ValueComparer<WrappedStringKeyClass?>
-    {
-        public WrappedStringKeyClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
-                v => v != null ? v.Value!.GetHashCode() : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedStringKeyClassComparer() : ValueComparer<WrappedStringKeyClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
+        v => v != null ? v.Value!.GetHashCode() : 0,
+        v => v == null ? null : new WrappedStringKeyClass { Value = v.Value });
 
-    protected struct WrappedStringKeyStruct
+    public struct WrappedStringKeyStruct
     {
         public string Value { get; set; }
 
@@ -2312,30 +2606,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => !left.Equals(right);
     }
 
-    protected class WrappedStringKeyStructConverter : ValueConverter<WrappedStringKeyStruct, string>
-    {
-        public WrappedStringKeyStructConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedStringKeyStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedStringKeyStructConverter() : ValueConverter<WrappedStringKeyStruct, string>(
+        v => v.Value,
+        v => new WrappedStringKeyStruct { Value = v });
 
-    protected record WrappedStringKeyRecord
+    public record WrappedStringKeyRecord
     {
         public string? Value { get; set; }
     }
 
-    protected class WrappedStringKeyRecordConverter : ValueConverter<WrappedStringKeyRecord, string>
-    {
-        public WrappedStringKeyRecordConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedStringKeyRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedStringKeyRecordConverter() : ValueConverter<WrappedStringKeyRecord, string>(
+        v => v.Value!,
+        v => new WrappedStringKeyRecord { Value = v });
 
     protected class WrappedStringClassPrincipal
     {
@@ -2344,8 +2626,12 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
         public WrappedStringClass? NonKey { get; set; }
         public ICollection<WrappedStringClassDependentShadow> Dependents { get; } = new List<WrappedStringClassDependentShadow>();
-        public ICollection<WrappedStringClassDependentRequired> RequiredDependents { get; } = new List<WrappedStringClassDependentRequired>();
-        public ICollection<WrappedStringClassDependentOptional> OptionalDependents { get; } = new List<WrappedStringClassDependentOptional>();
+
+        public ICollection<WrappedStringClassDependentRequired> RequiredDependents { get; } =
+            new List<WrappedStringClassDependentRequired>();
+
+        public ICollection<WrappedStringClassDependentOptional> OptionalDependents { get; } =
+            new List<WrappedStringClassDependentOptional>();
     }
 
     protected class WrappedStringClassDependentShadow
@@ -2381,8 +2667,12 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
         public WrappedStringStruct NonKey { get; set; }
         public ICollection<WrappedStringStructDependentShadow> Dependents { get; } = new List<WrappedStringStructDependentShadow>();
-        public ICollection<WrappedStringStructDependentOptional> OptionalDependents { get; } = new List<WrappedStringStructDependentOptional>();
-        public ICollection<WrappedStringStructDependentRequired> RequiredDependents { get; } = new List<WrappedStringStructDependentRequired>();
+
+        public ICollection<WrappedStringStructDependentOptional> OptionalDependents { get; } =
+            new List<WrappedStringStructDependentOptional>();
+
+        public ICollection<WrappedStringStructDependentRequired> RequiredDependents { get; } =
+            new List<WrappedStringStructDependentRequired>();
     }
 
     protected class WrappedStringStructDependentShadow
@@ -2418,8 +2708,12 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
         public WrappedStringRecord? NonKey { get; set; }
         public ICollection<WrappedStringRecordDependentShadow> Dependents { get; } = new List<WrappedStringRecordDependentShadow>();
-        public ICollection<WrappedStringRecordDependentOptional> OptionalDependents { get; } = new List<WrappedStringRecordDependentOptional>();
-        public ICollection<WrappedStringRecordDependentRequired> RequiredDependents { get; } = new List<WrappedStringRecordDependentRequired>();
+
+        public ICollection<WrappedStringRecordDependentOptional> OptionalDependents { get; } =
+            new List<WrappedStringRecordDependentOptional>();
+
+        public ICollection<WrappedStringRecordDependentRequired> RequiredDependents { get; } =
+            new List<WrappedStringRecordDependentRequired>();
     }
 
     protected class WrappedStringRecordDependentShadow
@@ -2449,39 +2743,45 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_wrapped_string_key()
+    public virtual Task Insert_update_and_delete_with_wrapped_string_key()
     {
         string? id1 = null;
         string? id2 = null;
         string? id3 = null;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new WrappedStringClassPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedStringKeyClassSentinel!,
+                        NonKey = Fixture.WrappedStringClassSentinel,
+                        Dependents = { new WrappedStringClassDependentShadow(), new WrappedStringClassDependentShadow() },
+                        OptionalDependents = { new WrappedStringClassDependentOptional(), new WrappedStringClassDependentOptional() },
+                        RequiredDependents = { new WrappedStringClassDependentRequired(), new WrappedStringClassDependentRequired() }
                     }).Entity;
 
                 var principal2 = context.Add(
                     new WrappedStringStructPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedStringKeyStructSentinel,
+                        NonKey = Fixture.WrappedStringStructSentinel,
+                        Dependents = { new WrappedStringStructDependentShadow(), new WrappedStringStructDependentShadow() },
+                        OptionalDependents = { new WrappedStringStructDependentOptional(), new WrappedStringStructDependentOptional() },
+                        RequiredDependents = { new WrappedStringStructDependentRequired(), new WrappedStringStructDependentRequired() }
                     }).Entity;
 
                 var principal3 = context.Add(
                     new WrappedStringRecordPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedStringKeyRecordSentinel!,
+                        NonKey = Fixture.WrappedStringRecordSentinel,
+                        Dependents = { new WrappedStringRecordDependentShadow(), new WrappedStringRecordDependentShadow() },
+                        OptionalDependents = { new WrappedStringRecordDependentOptional(), new WrappedStringRecordDependentOptional() },
+                        RequiredDependents = { new WrappedStringRecordDependentRequired(), new WrappedStringRecordDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id.Value;
                 Assert.NotNull(id1);
@@ -2491,12 +2791,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedStringKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
@@ -2514,12 +2816,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedStringKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
@@ -2537,12 +2841,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedStringKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
@@ -2552,13 +2858,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal("66", principal3.NonKey!.Value);
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<WrappedStringClassPrincipal>()
+                var principal1 = await context.Set<WrappedStringClassPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id.Value, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -2566,22 +2872,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedStringKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId.Value);
                 }
 
-                var principal2 = context.Set<WrappedStringStructPrincipal>()
+                var principal2 = await context.Set<WrappedStringStructPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal2.Id.Value, id2);
                 foreach (var dependent in principal2.Dependents)
@@ -2589,22 +2897,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedStringKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId.Value);
                 }
 
-                var principal3 = context.Set<WrappedStringRecordPrincipal>()
+                var principal3 = await context.Set<WrappedStringRecordPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal3.Id.Value, id3);
                 foreach (var dependent in principal3.Dependents)
@@ -2612,11 +2922,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedStringKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
@@ -2635,48 +2947,48 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal2.RequiredDependents.Remove(principal2.RequiredDependents.First());
                 principal3.RequiredDependents.Remove(principal3.RequiredDependents.First());
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<WrappedStringClassDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<WrappedStringClassDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(
                     context.Entry(dependents1.Single(e => e.Principal == null))
                         .Property<WrappedStringKeyClass?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<WrappedStringClassDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<WrappedStringClassDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<WrappedStringClassDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<WrappedStringClassDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
-                var dependents2 = context.Set<WrappedStringStructDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents2 = await context.Set<WrappedStringStructDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents2.Count);
                 Assert.Null(
                     context.Entry(dependents2.Single(e => e.Principal == null))
                         .Property<WrappedStringKeyStruct?>("PrincipalId").CurrentValue);
 
-                var optionalDependents2 = context.Set<WrappedStringStructDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents2 = await context.Set<WrappedStringStructDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents2.Count);
                 Assert.Null(optionalDependents2.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents2 = context.Set<WrappedStringStructDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents2.Count);
+                var requiredDependents2 = await context.Set<WrappedStringStructDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents2);
 
-                var dependents3 = context.Set<WrappedStringRecordDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents3 = await context.Set<WrappedStringRecordDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents3.Count);
                 Assert.Null(
                     context.Entry(dependents3.Single(e => e.Principal == null))
                         .Property<WrappedStringKeyRecord?>("PrincipalId").CurrentValue);
 
-                var optionalDependents3 = context.Set<WrappedStringRecordDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents3 = await context.Set<WrappedStringRecordDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents3.Count);
                 Assert.Null(optionalDependents3.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents3 = context.Set<WrappedStringRecordDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents3.Count);
+                var requiredDependents3 = await context.Set<WrappedStringRecordDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents3);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
@@ -2693,52 +3005,40 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Remove(requiredDependents3.Single());
                 context.Remove(requiredDependents3.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<WrappedStringClassDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedStringStructDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedStringRecordDependentShadow>().Count());
+                Assert.Equal(1, await context.Set<WrappedStringClassDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedStringStructDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedStringRecordDependentShadow>().CountAsync());
 
-                Assert.Equal(1, context.Set<WrappedStringClassDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedStringStructDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedStringRecordDependentOptional>().Count());
+                Assert.Equal(1, await context.Set<WrappedStringClassDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedStringStructDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedStringRecordDependentOptional>().CountAsync());
 
-                Assert.Equal(0, context.Set<WrappedStringClassDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedStringStructDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedStringRecordDependentRequired>().Count());
+                Assert.Equal(0, await context.Set<WrappedStringClassDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedStringStructDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedStringRecordDependentRequired>().CountAsync());
             });
     }
 
     // ReSharper disable once StaticMemberInGenericType
     protected static readonly Guid KnownGuid = Guid.Parse("E871CEA4-8DBE-4269-99F4-87F7128AF399");
 
-    protected class WrappedGuidClass
+    public class WrappedGuidClass
     {
         public Guid Value { get; set; }
     }
 
-    protected class WrappedGuidClassConverter : ValueConverter<WrappedGuidClass, Guid>
-    {
-        public WrappedGuidClassConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedGuidClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedGuidClassConverter() : ValueConverter<WrappedGuidClass, Guid>(
+        v => v.Value,
+        v => new WrappedGuidClass { Value = v });
 
-    protected class WrappedGuidClassComparer : ValueComparer<WrappedGuidClass?>
-    {
-        public WrappedGuidClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
-                v => v != null ? v.Value.GetHashCode() : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedGuidClassComparer() : ValueComparer<WrappedGuidClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
+        v => v != null ? v.Value.GetHashCode() : 0,
+        v => v == null ? null : new WrappedGuidClass { Value = v.Value });
 
     protected class WrappedGuidClassValueGenerator : ValueGenerator<WrappedGuidClass>
     {
@@ -2749,20 +3049,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected struct WrappedGuidStruct
+    public struct WrappedGuidStruct
     {
         public Guid Value { get; set; }
     }
 
-    protected class WrappedGuidStructConverter : ValueConverter<WrappedGuidStruct, Guid>
-    {
-        public WrappedGuidStructConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedGuidStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedGuidStructConverter() : ValueConverter<WrappedGuidStruct, Guid>(
+        v => v.Value,
+        v => new WrappedGuidStruct { Value = v });
 
     protected class WrappedGuidStructValueGenerator : ValueGenerator<WrappedGuidStruct>
     {
@@ -2773,20 +3067,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected record WrappedGuidRecord
+    public record WrappedGuidRecord
     {
         public Guid Value { get; set; }
     }
 
-    protected class WrappedGuidRecordConverter : ValueConverter<WrappedGuidRecord, Guid>
-    {
-        public WrappedGuidRecordConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedGuidRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedGuidRecordConverter() : ValueConverter<WrappedGuidRecord, Guid>(
+        v => v.Value,
+        v => new WrappedGuidRecord { Value = v });
 
     protected class WrappedGuidRecordValueGenerator : ValueGenerator<WrappedGuidRecord>
     {
@@ -2797,33 +3085,21 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected class WrappedGuidKeyClass
+    public class WrappedGuidKeyClass
     {
         public Guid Value { get; set; }
     }
 
-    protected class WrappedGuidKeyClassConverter : ValueConverter<WrappedGuidKeyClass, Guid>
-    {
-        public WrappedGuidKeyClassConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedGuidKeyClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedGuidKeyClassConverter() : ValueConverter<WrappedGuidKeyClass, Guid>(
+        v => v.Value,
+        v => new WrappedGuidKeyClass { Value = v });
 
-    protected class WrappedGuidKeyClassComparer : ValueComparer<WrappedGuidKeyClass?>
-    {
-        public WrappedGuidKeyClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
-                v => v != null ? v.Value.GetHashCode() : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedGuidKeyClassComparer() : ValueComparer<WrappedGuidKeyClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value.Equals(v2.Value)),
+        v => v != null ? v.Value.GetHashCode() : 0,
+        v => v == null ? null : new WrappedGuidKeyClass { Value = v.Value });
 
-    protected struct WrappedGuidKeyStruct
+    public struct WrappedGuidKeyStruct
     {
         public Guid Value { get; set; }
 
@@ -2840,30 +3116,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => !left.Equals(right);
     }
 
-    protected class WrappedGuidKeyStructConverter : ValueConverter<WrappedGuidKeyStruct, Guid>
-    {
-        public WrappedGuidKeyStructConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedGuidKeyStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedGuidKeyStructConverter() : ValueConverter<WrappedGuidKeyStruct, Guid>(
+        v => v.Value,
+        v => new WrappedGuidKeyStruct { Value = v });
 
-    protected record WrappedGuidKeyRecord
+    public record WrappedGuidKeyRecord
     {
         public Guid Value { get; set; }
     }
 
-    protected class WrappedGuidKeyRecordConverter : ValueConverter<WrappedGuidKeyRecord, Guid>
-    {
-        public WrappedGuidKeyRecordConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedGuidKeyRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedGuidKeyRecordConverter() : ValueConverter<WrappedGuidKeyRecord, Guid>(
+        v => v.Value,
+        v => new WrappedGuidKeyRecord { Value = v });
 
     protected class WrappedGuidClassPrincipal
     {
@@ -2977,39 +3241,45 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_wrapped_Guid_key()
+    public virtual Task Insert_update_and_delete_with_wrapped_Guid_key()
     {
         var id1 = Guid.Empty;
         var id2 = Guid.Empty;
         var id3 = Guid.Empty;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new WrappedGuidClassPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedGuidKeyClassSentinel!,
+                        NonKey = Fixture.WrappedGuidClassSentinel,
+                        Dependents = { new WrappedGuidClassDependentShadow(), new WrappedGuidClassDependentShadow() },
+                        OptionalDependents = { new WrappedGuidClassDependentOptional(), new WrappedGuidClassDependentOptional() },
+                        RequiredDependents = { new WrappedGuidClassDependentRequired(), new WrappedGuidClassDependentRequired() }
                     }).Entity;
 
                 var principal2 = context.Add(
                     new WrappedGuidStructPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedGuidKeyStructSentinel,
+                        NonKey = Fixture.WrappedGuidStructSentinel,
+                        Dependents = { new WrappedGuidStructDependentShadow(), new WrappedGuidStructDependentShadow() },
+                        OptionalDependents = { new WrappedGuidStructDependentOptional(), new WrappedGuidStructDependentOptional() },
+                        RequiredDependents = { new WrappedGuidStructDependentRequired(), new WrappedGuidStructDependentRequired() }
                     }).Entity;
 
                 var principal3 = context.Add(
                     new WrappedGuidRecordPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedGuidKeyRecordSentinel!,
+                        NonKey = Fixture.WrappedGuidRecordSentinel,
+                        Dependents = { new WrappedGuidRecordDependentShadow(), new WrappedGuidRecordDependentShadow() },
+                        OptionalDependents = { new WrappedGuidRecordDependentOptional(), new WrappedGuidRecordDependentOptional() },
+                        RequiredDependents = { new WrappedGuidRecordDependentRequired(), new WrappedGuidRecordDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id.Value;
                 Assert.NotEqual(Guid.Empty, id1);
@@ -3019,12 +3289,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedGuidKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.NotEqual(Guid.Empty, dependent.Id.Value);
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.NotEqual(Guid.Empty, dependent.Id.Value);
@@ -3042,12 +3314,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedGuidKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.NotEqual(Guid.Empty, dependent.Id.Value);
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.NotEqual(Guid.Empty, dependent.Id.Value);
@@ -3065,12 +3339,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedGuidKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.NotEqual(Guid.Empty, dependent.Id.Value);
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.NotEqual(Guid.Empty, dependent.Id.Value);
@@ -3080,13 +3356,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(KnownGuid, principal3.NonKey!.Value);
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<WrappedGuidClassPrincipal>()
+                var principal1 = await context.Set<WrappedGuidClassPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id.Value, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -3094,22 +3370,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedGuidKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId.Value);
                 }
 
-                var principal2 = context.Set<WrappedGuidStructPrincipal>()
+                var principal2 = await context.Set<WrappedGuidStructPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal2.Id.Value, id2);
                 foreach (var dependent in principal2.Dependents)
@@ -3117,22 +3395,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedGuidKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId.Value);
                 }
 
-                var principal3 = context.Set<WrappedGuidRecordPrincipal>()
+                var principal3 = await context.Set<WrappedGuidRecordPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal3.Id.Value, id3);
                 foreach (var dependent in principal3.Dependents)
@@ -3140,11 +3420,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedGuidKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
@@ -3163,48 +3445,48 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal2.RequiredDependents.Remove(principal2.RequiredDependents.First());
                 principal3.RequiredDependents.Remove(principal3.RequiredDependents.First());
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<WrappedGuidClassDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<WrappedGuidClassDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(
                     context.Entry(dependents1.Single(e => e.Principal == null))
                         .Property<WrappedGuidKeyClass?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<WrappedGuidClassDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<WrappedGuidClassDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<WrappedGuidClassDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<WrappedGuidClassDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
-                var dependents2 = context.Set<WrappedGuidStructDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents2 = await context.Set<WrappedGuidStructDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents2.Count);
                 Assert.Null(
                     context.Entry(dependents2.Single(e => e.Principal == null))
                         .Property<WrappedGuidKeyStruct?>("PrincipalId").CurrentValue);
 
-                var optionalDependents2 = context.Set<WrappedGuidStructDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents2 = await context.Set<WrappedGuidStructDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents2.Count);
                 Assert.Null(optionalDependents2.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents2 = context.Set<WrappedGuidStructDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents2.Count);
+                var requiredDependents2 = await context.Set<WrappedGuidStructDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents2);
 
-                var dependents3 = context.Set<WrappedGuidRecordDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents3 = await context.Set<WrappedGuidRecordDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents3.Count);
                 Assert.Null(
                     context.Entry(dependents3.Single(e => e.Principal == null))
                         .Property<WrappedGuidKeyRecord?>("PrincipalId").CurrentValue);
 
-                var optionalDependents3 = context.Set<WrappedGuidRecordDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents3 = await context.Set<WrappedGuidRecordDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents3.Count);
                 Assert.Null(optionalDependents3.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents3 = context.Set<WrappedGuidRecordDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents3.Count);
+                var requiredDependents3 = await context.Set<WrappedGuidRecordDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents3);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
@@ -3221,49 +3503,37 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Remove(requiredDependents3.Single());
                 context.Remove(requiredDependents3.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<WrappedGuidClassDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedGuidStructDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedGuidRecordDependentShadow>().Count());
+                Assert.Equal(1, await context.Set<WrappedGuidClassDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedGuidStructDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedGuidRecordDependentShadow>().CountAsync());
 
-                Assert.Equal(1, context.Set<WrappedGuidClassDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedGuidStructDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedGuidRecordDependentOptional>().Count());
+                Assert.Equal(1, await context.Set<WrappedGuidClassDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedGuidStructDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedGuidRecordDependentOptional>().CountAsync());
 
-                Assert.Equal(0, context.Set<WrappedGuidClassDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedGuidStructDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedGuidRecordDependentRequired>().Count());
+                Assert.Equal(0, await context.Set<WrappedGuidClassDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedGuidStructDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedGuidRecordDependentRequired>().CountAsync());
             });
     }
 
-    protected class WrappedUriClass
+    public class WrappedUriClass
     {
         public Uri? Value { get; set; }
     }
 
-    protected class WrappedUriClassConverter : ValueConverter<WrappedUriClass, Uri>
-    {
-        public WrappedUriClassConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedUriClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedUriClassConverter() : ValueConverter<WrappedUriClass, Uri>(
+        v => v.Value!,
+        v => new WrappedUriClass { Value = v });
 
-    protected class WrappedUriClassComparer : ValueComparer<WrappedUriClass?>
-    {
-        public WrappedUriClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
-                v => v != null ? v.Value!.GetHashCode() : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedUriClassComparer() : ValueComparer<WrappedUriClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
+        v => v != null ? v.Value!.GetHashCode() : 0,
+        v => v == null ? null : new WrappedUriClass { Value = v.Value });
 
     protected class WrappedUriClassValueGenerator : ValueGenerator<WrappedUriClass>
     {
@@ -3274,20 +3544,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected struct WrappedUriStruct
+    public struct WrappedUriStruct
     {
         public Uri Value { get; set; }
     }
 
-    protected class WrappedUriStructConverter : ValueConverter<WrappedUriStruct, Uri>
-    {
-        public WrappedUriStructConverter()
-            : base(
-                v => v.Value,
-                v => new WrappedUriStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedUriStructConverter() : ValueConverter<WrappedUriStruct, Uri>(
+        v => v.Value,
+        v => new WrappedUriStruct { Value = v });
 
     protected class WrappedUriStructValueGenerator : ValueGenerator<WrappedUriStruct>
     {
@@ -3298,20 +3562,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected record WrappedUriRecord
+    public record WrappedUriRecord
     {
         public Uri? Value { get; set; }
     }
 
-    protected class WrappedUriRecordConverter : ValueConverter<WrappedUriRecord, Uri>
-    {
-        public WrappedUriRecordConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedUriRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedUriRecordConverter() : ValueConverter<WrappedUriRecord, Uri>(
+        v => v.Value!,
+        v => new WrappedUriRecord { Value = v });
 
     protected class WrappedUriRecordValueGenerator : ValueGenerator<WrappedUriRecord>
     {
@@ -3322,33 +3580,21 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => false;
     }
 
-    protected class WrappedUriKeyClass
+    public class WrappedUriKeyClass
     {
         public Uri? Value { get; set; }
     }
 
-    protected class WrappedUriKeyClassConverter : ValueConverter<WrappedUriKeyClass, Uri>
-    {
-        public WrappedUriKeyClassConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedUriKeyClass { Value = v })
-        {
-        }
-    }
+    protected class WrappedUriKeyClassConverter() : ValueConverter<WrappedUriKeyClass, Uri>(
+        v => v.Value!,
+        v => new WrappedUriKeyClass { Value = v });
 
-    protected class WrappedUriKeyClassComparer : ValueComparer<WrappedUriKeyClass?>
-    {
-        public WrappedUriKeyClassComparer()
-            : base(
-                (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
-                v => v != null ? v.Value!.GetHashCode() : 0,
-                v => v == null ? null : new() { Value = v.Value })
-        {
-        }
-    }
+    protected class WrappedUriKeyClassComparer() : ValueComparer<WrappedUriKeyClass?>(
+        (v1, v2) => (v1 == null && v2 == null) || (v1 != null && v2 != null && v1.Value!.Equals(v2.Value)),
+        v => v != null ? v.Value!.GetHashCode() : 0,
+        v => v == null ? null : new WrappedUriKeyClass { Value = v.Value });
 
-    protected struct WrappedUriKeyStruct
+    public struct WrappedUriKeyStruct
     {
         public Uri? Value { get; set; }
 
@@ -3368,30 +3614,18 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
             => !left.Equals(right);
     }
 
-    protected class WrappedUriKeyStructConverter : ValueConverter<WrappedUriKeyStruct, Uri>
-    {
-        public WrappedUriKeyStructConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedUriKeyStruct { Value = v })
-        {
-        }
-    }
+    protected class WrappedUriKeyStructConverter() : ValueConverter<WrappedUriKeyStruct, Uri>(
+        v => v.Value!,
+        v => new WrappedUriKeyStruct { Value = v });
 
-    protected record WrappedUriKeyRecord
+    public record WrappedUriKeyRecord
     {
         public Uri? Value { get; set; }
     }
 
-    protected class WrappedUriKeyRecordConverter : ValueConverter<WrappedUriKeyRecord, Uri>
-    {
-        public WrappedUriKeyRecordConverter()
-            : base(
-                v => v.Value!,
-                v => new WrappedUriKeyRecord { Value = v })
-        {
-        }
-    }
+    protected class WrappedUriKeyRecordConverter() : ValueConverter<WrappedUriKeyRecord, Uri>(
+        v => v.Value!,
+        v => new WrappedUriKeyRecord { Value = v });
 
     protected class WrappedUriClassPrincipal
     {
@@ -3505,39 +3739,45 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_wrapped_Uri_key()
+    public virtual Task Insert_update_and_delete_with_wrapped_Uri_key()
     {
         Uri? id1 = null;
         Uri? id2 = null;
         Uri? id3 = null;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new WrappedUriClassPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedUriKeyClassSentinel!,
+                        NonKey = Fixture.WrappedUriClassSentinel,
+                        Dependents = { new WrappedUriClassDependentShadow(), new WrappedUriClassDependentShadow() },
+                        OptionalDependents = { new WrappedUriClassDependentOptional(), new WrappedUriClassDependentOptional() },
+                        RequiredDependents = { new WrappedUriClassDependentRequired(), new WrappedUriClassDependentRequired() }
                     }).Entity;
 
                 var principal2 = context.Add(
                     new WrappedUriStructPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedUriKeyStructSentinel,
+                        NonKey = Fixture.WrappedUriStructSentinel,
+                        Dependents = { new WrappedUriStructDependentShadow(), new WrappedUriStructDependentShadow() },
+                        OptionalDependents = { new WrappedUriStructDependentOptional(), new WrappedUriStructDependentOptional() },
+                        RequiredDependents = { new WrappedUriStructDependentRequired(), new WrappedUriStructDependentRequired() }
                     }).Entity;
 
                 var principal3 = context.Add(
                     new WrappedUriRecordPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.WrappedUriKeyRecordSentinel!,
+                        NonKey = Fixture.WrappedUriRecordSentinel,
+                        Dependents = { new WrappedUriRecordDependentShadow(), new WrappedUriRecordDependentShadow() },
+                        OptionalDependents = { new WrappedUriRecordDependentOptional(), new WrappedUriRecordDependentOptional() },
+                        RequiredDependents = { new WrappedUriRecordDependentRequired(), new WrappedUriRecordDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id.Value;
                 Assert.NotNull(id1);
@@ -3547,12 +3787,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedUriKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
@@ -3570,12 +3812,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedUriKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
@@ -3593,12 +3837,14 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedUriKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.NotNull(dependent.Id.Value);
@@ -3608,13 +3854,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
                 Assert.Equal(new Uri("https://www.example.com"), principal3.NonKey!.Value);
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<WrappedUriClassPrincipal>()
+                var principal1 = await context.Set<WrappedUriClassPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id.Value, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -3622,22 +3868,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<WrappedUriKeyClass?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal1.OptionalDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal1.RequiredDependents)
                 {
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, dependent.PrincipalId.Value);
                 }
 
-                var principal2 = context.Set<WrappedUriStructPrincipal>()
+                var principal2 = await context.Set<WrappedUriStructPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal2.Id.Value, id2);
                 foreach (var dependent in principal2.Dependents)
@@ -3645,22 +3893,24 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, context.Entry(dependent).Property<WrappedUriKeyStruct?>("PrincipalId").CurrentValue!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.OptionalDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId!.Value.Value);
                 }
+
                 foreach (var dependent in principal2.RequiredDependents)
                 {
                     Assert.Same(principal2, dependent.Principal);
                     Assert.Equal(id2, dependent.PrincipalId.Value);
                 }
 
-                var principal3 = context.Set<WrappedUriRecordPrincipal>()
+                var principal3 = await context.Set<WrappedUriRecordPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal3.Id.Value, id3);
                 foreach (var dependent in principal3.Dependents)
@@ -3668,11 +3918,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, context.Entry(dependent).Property<WrappedUriKeyRecord?>("PrincipalId").CurrentValue!.Value);
                 }
+
                 foreach (var dependent in principal3.OptionalDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
                     Assert.Equal(id3, dependent.PrincipalId!.Value);
                 }
+
                 foreach (var dependent in principal3.RequiredDependents)
                 {
                     Assert.Same(principal3, dependent.Principal);
@@ -3691,48 +3943,48 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal2.RequiredDependents.Remove(principal2.RequiredDependents.First());
                 principal3.RequiredDependents.Remove(principal3.RequiredDependents.First());
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<WrappedUriClassDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<WrappedUriClassDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(
                     context.Entry(dependents1.Single(e => e.Principal == null))
                         .Property<WrappedUriKeyClass?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<WrappedUriClassDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<WrappedUriClassDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<WrappedUriClassDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<WrappedUriClassDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
-                var dependents2 = context.Set<WrappedUriStructDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents2 = await context.Set<WrappedUriStructDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents2.Count);
                 Assert.Null(
                     context.Entry(dependents2.Single(e => e.Principal == null))
                         .Property<WrappedUriKeyStruct?>("PrincipalId").CurrentValue);
 
-                var optionalDependents2 = context.Set<WrappedUriStructDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents2 = await context.Set<WrappedUriStructDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents2.Count);
                 Assert.Null(optionalDependents2.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents2 = context.Set<WrappedUriStructDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents2.Count);
+                var requiredDependents2 = await context.Set<WrappedUriStructDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents2);
 
-                var dependents3 = context.Set<WrappedUriRecordDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents3 = await context.Set<WrappedUriRecordDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents3.Count);
                 Assert.Null(
                     context.Entry(dependents3.Single(e => e.Principal == null))
                         .Property<WrappedUriKeyRecord?>("PrincipalId").CurrentValue);
 
-                var optionalDependents3 = context.Set<WrappedUriRecordDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents3 = await context.Set<WrappedUriRecordDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents3.Count);
                 Assert.Null(optionalDependents3.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents3 = context.Set<WrappedUriRecordDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents3.Count);
+                var requiredDependents3 = await context.Set<WrappedUriRecordDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents3);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
@@ -3749,21 +4001,21 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 context.Remove(requiredDependents3.Single());
                 context.Remove(requiredDependents3.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<WrappedUriClassDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedUriStructDependentShadow>().Count());
-                Assert.Equal(1, context.Set<WrappedUriRecordDependentShadow>().Count());
+                Assert.Equal(1, await context.Set<WrappedUriClassDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedUriStructDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedUriRecordDependentShadow>().CountAsync());
 
-                Assert.Equal(1, context.Set<WrappedUriClassDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedUriStructDependentOptional>().Count());
-                Assert.Equal(1, context.Set<WrappedUriRecordDependentOptional>().Count());
+                Assert.Equal(1, await context.Set<WrappedUriClassDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedUriStructDependentOptional>().CountAsync());
+                Assert.Equal(1, await context.Set<WrappedUriRecordDependentOptional>().CountAsync());
 
-                Assert.Equal(0, context.Set<WrappedUriClassDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedUriStructDependentRequired>().Count());
-                Assert.Equal(0, context.Set<WrappedUriRecordDependentRequired>().Count());
+                Assert.Equal(0, await context.Set<WrappedUriClassDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedUriStructDependentRequired>().CountAsync());
+                Assert.Equal(0, await context.Set<WrappedUriRecordDependentRequired>().CountAsync());
             });
     }
 
@@ -3804,21 +4056,22 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_Uri_key()
+    public virtual Task Insert_update_and_delete_with_Uri_key()
     {
         Uri? id1 = null;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new UriPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.UriSentinel!,
+                        Dependents = { new UriDependentShadow(), new UriDependentShadow() },
+                        OptionalDependents = { new UriDependentOptional(), new UriDependentOptional() },
+                        RequiredDependents = { new UriDependentRequired(), new UriDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id;
                 Assert.NotNull(id1);
@@ -3829,13 +4082,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Equal(id1, context.Entry(dependent).Property<Uri?>("PrincipalId").CurrentValue);
                 }
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<UriPrincipal>()
+                var principal1 = await context.Set<UriPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -3847,37 +4100,37 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal1.Dependents.Remove(principal1.Dependents.First());
                 principal1.OptionalDependents.Remove(principal1.OptionalDependents.First());
                 principal1.RequiredDependents.Remove(principal1.RequiredDependents.First());
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<UriDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<UriDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(context.Entry(dependents1.Single(e => e.Principal == null)).Property<Uri?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<UriDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<UriDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<UriDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<UriDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
                 context.Remove(requiredDependents1.Single());
                 context.Remove(requiredDependents1.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<UriDependentShadow>().Count());
-                Assert.Equal(1, context.Set<UriDependentOptional>().Count());
-                Assert.Equal(0, context.Set<UriDependentRequired>().Count());
+                Assert.Equal(1, await context.Set<UriDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<UriDependentOptional>().CountAsync());
+                Assert.Equal(0, await context.Set<UriDependentRequired>().CountAsync());
             });
     }
 
-    protected enum KeyEnum
+    public enum KeyEnum
     {
         A,
         B,
@@ -3923,38 +4176,38 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_enum_key()
+    public virtual Task Insert_update_and_delete_with_enum_key()
     {
         KeyEnum? id1 = null;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new EnumPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.KeyEnumSentinel,
+                        Dependents = { new EnumDependentShadow(), new EnumDependentShadow() },
+                        OptionalDependents = { new EnumDependentOptional(), new EnumDependentOptional() },
+                        RequiredDependents = { new EnumDependentRequired(), new EnumDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id;
                 Assert.NotNull(id1);
                 foreach (var dependent in principal1.Dependents)
                 {
-                    Assert.NotNull(dependent.Id);
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<KeyEnum?>("PrincipalId").CurrentValue);
                 }
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<EnumPrincipal>()
+                var principal1 = await context.Set<EnumPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -3966,33 +4219,33 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal1.Dependents.Remove(principal1.Dependents.First());
                 principal1.OptionalDependents.Remove(principal1.OptionalDependents.First());
                 principal1.RequiredDependents.Remove(principal1.RequiredDependents.First());
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<EnumDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<EnumDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(context.Entry(dependents1.Single(e => e.Principal == null)).Property<KeyEnum?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<EnumDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<EnumDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<EnumDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<EnumDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
                 context.Remove(requiredDependents1.Single());
                 context.Remove(requiredDependents1.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<EnumDependentShadow>().Count());
-                Assert.Equal(1, context.Set<EnumDependentOptional>().Count());
-                Assert.Equal(0, context.Set<EnumDependentRequired>().Count());
+                Assert.Equal(1, await context.Set<EnumDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<EnumDependentOptional>().CountAsync());
+                Assert.Equal(0, await context.Set<EnumDependentRequired>().CountAsync());
             });
     }
 
@@ -4033,38 +4286,38 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_GuidAsString_key()
+    public virtual Task Insert_update_and_delete_with_GuidAsString_key()
     {
         Guid? id1 = null;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new GuidAsStringPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.GuidAsStringSentinel,
+                        Dependents = { new GuidAsStringDependentShadow(), new GuidAsStringDependentShadow() },
+                        OptionalDependents = { new GuidAsStringDependentOptional(), new GuidAsStringDependentOptional() },
+                        RequiredDependents = { new GuidAsStringDependentRequired(), new GuidAsStringDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id;
                 Assert.NotNull(id1);
                 foreach (var dependent in principal1.Dependents)
                 {
-                    Assert.NotNull(dependent.Id);
                     Assert.Same(principal1, dependent.Principal);
                     Assert.Equal(id1, context.Entry(dependent).Property<Guid?>("PrincipalId").CurrentValue);
                 }
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<GuidAsStringPrincipal>()
+                var principal1 = await context.Set<GuidAsStringPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -4076,33 +4329,33 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal1.Dependents.Remove(principal1.Dependents.First());
                 principal1.OptionalDependents.Remove(principal1.OptionalDependents.First());
                 principal1.RequiredDependents.Remove(principal1.RequiredDependents.First());
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<GuidAsStringDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<GuidAsStringDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(context.Entry(dependents1.Single(e => e.Principal == null)).Property<Guid?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<GuidAsStringDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<GuidAsStringDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<GuidAsStringDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<GuidAsStringDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
                 context.Remove(requiredDependents1.Single());
                 context.Remove(requiredDependents1.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<GuidAsStringDependentShadow>().Count());
-                Assert.Equal(1, context.Set<GuidAsStringDependentOptional>().Count());
-                Assert.Equal(0, context.Set<GuidAsStringDependentRequired>().Count());
+                Assert.Equal(1, await context.Set<GuidAsStringDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<GuidAsStringDependentOptional>().CountAsync());
+                Assert.Equal(0, await context.Set<GuidAsStringDependentRequired>().CountAsync());
             });
     }
 
@@ -4143,21 +4396,22 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
     }
 
     [ConditionalFact]
-    public virtual void Insert_update_and_delete_with_StringAsGuid_key()
+    public virtual Task Insert_update_and_delete_with_StringAsGuid_key()
     {
         string? id1 = null;
-        ExecuteWithStrategyInTransaction(
-            context =>
+        return ExecuteWithStrategyInTransactionAsync(
+            async context =>
             {
                 var principal1 = context.Add(
                     new StringAsGuidPrincipal
                     {
-                        Dependents = { new(), new() },
-                        OptionalDependents = { new(), new() },
-                        RequiredDependents = { new(), new() }
+                        Id = Fixture.StringAsGuidSentinel!,
+                        Dependents = { new StringAsGuidDependentShadow(), new StringAsGuidDependentShadow() },
+                        OptionalDependents = { new StringAsGuidDependentOptional(), new StringAsGuidDependentOptional() },
+                        RequiredDependents = { new StringAsGuidDependentRequired(), new StringAsGuidDependentRequired() }
                     }).Entity;
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
 
                 id1 = principal1.Id;
                 Assert.NotNull(id1);
@@ -4168,13 +4422,13 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                     Assert.Equal(id1, context.Entry(dependent).Property<string?>("PrincipalId").CurrentValue);
                 }
             },
-            context =>
+            async context =>
             {
-                var principal1 = context.Set<StringAsGuidPrincipal>()
+                var principal1 = await context.Set<StringAsGuidPrincipal>()
                     .Include(e => e.Dependents)
                     .Include(e => e.OptionalDependents)
                     .Include(e => e.RequiredDependents)
-                    .Single();
+                    .SingleAsync();
 
                 Assert.Equal(principal1.Id, id1);
                 foreach (var dependent in principal1.Dependents)
@@ -4186,42 +4440,42 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 principal1.Dependents.Remove(principal1.Dependents.First());
                 principal1.OptionalDependents.Remove(principal1.OptionalDependents.First());
                 principal1.RequiredDependents.Remove(principal1.RequiredDependents.First());
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                var dependents1 = context.Set<StringAsGuidDependentShadow>().Include(e => e.Principal).ToList();
+                var dependents1 = await context.Set<StringAsGuidDependentShadow>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, dependents1.Count);
                 Assert.Null(context.Entry(dependents1.Single(e => e.Principal == null)).Property<string?>("PrincipalId").CurrentValue);
 
-                var optionalDependents1 = context.Set<StringAsGuidDependentOptional>().Include(e => e.Principal).ToList();
+                var optionalDependents1 = await context.Set<StringAsGuidDependentOptional>().Include(e => e.Principal).ToListAsync();
                 Assert.Equal(2, optionalDependents1.Count);
                 Assert.Null(optionalDependents1.Single(e => e.Principal == null).PrincipalId);
 
-                var requiredDependents1 = context.Set<StringAsGuidDependentRequired>().Include(e => e.Principal).ToList();
-                Assert.Equal(1, requiredDependents1.Count);
+                var requiredDependents1 = await context.Set<StringAsGuidDependentRequired>().Include(e => e.Principal).ToListAsync();
+                Assert.Single(requiredDependents1);
 
                 context.Remove(dependents1.Single(e => e.Principal != null));
                 context.Remove(optionalDependents1.Single(e => e.Principal != null));
                 context.Remove(requiredDependents1.Single());
                 context.Remove(requiredDependents1.Single().Principal);
 
-                context.SaveChanges();
+                await context.SaveChangesAsync();
             },
-            context =>
+            async context =>
             {
-                Assert.Equal(1, context.Set<StringAsGuidDependentShadow>().Count());
-                Assert.Equal(1, context.Set<StringAsGuidDependentOptional>().Count());
-                Assert.Equal(0, context.Set<StringAsGuidDependentRequired>().Count());
+                Assert.Equal(1, await context.Set<StringAsGuidDependentShadow>().CountAsync());
+                Assert.Equal(1, await context.Set<StringAsGuidDependentOptional>().CountAsync());
+                Assert.Equal(0, await context.Set<StringAsGuidDependentRequired>().CountAsync());
             });
     }
 
-    protected virtual void ExecuteWithStrategyInTransaction(
-        Action<DbContext> testOperation,
-        Action<DbContext>? nestedTestOperation1 = null,
-        Action<DbContext>? nestedTestOperation2 = null,
-        Action<DbContext>? nestedTestOperation3 = null)
-        => TestHelpers.ExecuteWithStrategyInTransaction(
+    protected virtual Task ExecuteWithStrategyInTransactionAsync(
+        Func<DbContext, Task> testOperation,
+        Func<DbContext, Task>? nestedTestOperation1 = null,
+        Func<DbContext, Task>? nestedTestOperation2 = null,
+        Func<DbContext, Task>? nestedTestOperation3 = null)
+        => TestHelpers.ExecuteWithStrategyInTransactionAsync(
             CreateContext, UseTransaction,
             testOperation, nestedTestOperation1, nestedTestOperation2, nestedTestOperation3);
 
@@ -4234,7 +4488,113 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
 
     public abstract class StoreGeneratedFixtureBase : SharedStoreFixtureBase<PoolableDbContext>
     {
-        protected override string StoreName { get; } = "StoreGeneratedTest";
+        public virtual Guid GuidSentinel
+            => default;
+
+        public virtual int IntSentinel
+            => default;
+
+        public virtual short ShortSentinel
+            => default;
+
+        public virtual long LongSentinel
+            => default;
+
+        public virtual int? NullableIntSentinel
+            => default;
+
+        public virtual bool BoolSentinel
+            => default;
+
+        public virtual bool? NullableBoolSentinel
+            => default;
+
+        public virtual string? StringSentinel
+            => default;
+
+        public virtual Uri? UriSentinel
+            => default;
+
+        public virtual KeyEnum KeyEnumSentinel
+            => default;
+
+        public virtual string? StringAsGuidSentinel
+            => default;
+
+        public virtual Guid GuidAsStringSentinel
+            => default;
+
+        public virtual WrappedIntKeyClass? WrappedIntKeyClassSentinel
+            => default;
+
+        public virtual WrappedIntClass? WrappedIntClassSentinel
+            => default;
+
+        public virtual WrappedIntKeyStruct WrappedIntKeyStructSentinel
+            => default;
+
+        public virtual WrappedIntStruct WrappedIntStructSentinel
+            => default;
+
+        public virtual WrappedIntKeyRecord? WrappedIntKeyRecordSentinel
+            => default;
+
+        public virtual WrappedIntRecord? WrappedIntRecordSentinel
+            => default;
+
+        public virtual WrappedStringKeyClass? WrappedStringKeyClassSentinel
+            => default;
+
+        public virtual WrappedStringClass? WrappedStringClassSentinel
+            => default;
+
+        public virtual WrappedStringKeyStruct WrappedStringKeyStructSentinel
+            => default;
+
+        public virtual WrappedStringStruct WrappedStringStructSentinel
+            => default;
+
+        public virtual WrappedStringKeyRecord? WrappedStringKeyRecordSentinel
+            => default;
+
+        public virtual WrappedStringRecord? WrappedStringRecordSentinel
+            => default;
+
+        public virtual WrappedGuidKeyClass? WrappedGuidKeyClassSentinel
+            => default;
+
+        public virtual WrappedGuidClass? WrappedGuidClassSentinel
+            => default;
+
+        public virtual WrappedGuidKeyStruct WrappedGuidKeyStructSentinel
+            => default;
+
+        public virtual WrappedGuidStruct WrappedGuidStructSentinel
+            => default;
+
+        public virtual WrappedGuidKeyRecord? WrappedGuidKeyRecordSentinel
+            => default;
+
+        public virtual WrappedGuidRecord? WrappedGuidRecordSentinel
+            => default;
+
+        public virtual WrappedUriKeyClass? WrappedUriKeyClassSentinel
+            => default;
+
+        public virtual WrappedUriClass? WrappedUriClassSentinel
+            => default;
+
+        public virtual WrappedUriKeyStruct WrappedUriKeyStructSentinel
+            => default;
+
+        public virtual WrappedUriStruct WrappedUriStructSentinel
+            => default;
+
+        public virtual WrappedUriKeyRecord? WrappedUriKeyRecordSentinel
+            => default;
+
+        public virtual WrappedUriRecord? WrappedUriRecordSentinel
+            => default;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder, DbContext context)
         {
@@ -4518,6 +4878,16 @@ public abstract class StoreGeneratedTestBase<TFixture> : IClassFixture<TFixture>
                 entity =>
                 {
                     entity.Property(e => e.NonKey).HasValueGenerator<WrappedIntRecordValueGenerator>();
+                });
+
+            modelBuilder.Entity<LongToIntPrincipal>(
+                entity =>
+                {
+                    var keyConverter = new ValueConverter<long, int>(
+                        v => (int)v,
+                        v => v);
+
+                    entity.Property(e => e.Id).HasConversion(keyConverter);
                 });
 
             modelBuilder.Entity<WrappedGuidClassPrincipal>(

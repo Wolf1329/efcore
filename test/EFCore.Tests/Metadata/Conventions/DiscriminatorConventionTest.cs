@@ -117,8 +117,8 @@ public class DiscriminatorConventionTest
         Assert.Same(discriminator, ((IReadOnlyEntityType)baseTypeBuilder.Metadata).FindDiscriminatorProperty());
         Assert.Equal("T", discriminator.Name);
         Assert.Equal(typeof(int), discriminator.ClrType);
-        Assert.Null(baseTypeBuilder.Metadata.GetDiscriminatorValue());
-        Assert.Null(entityTypeBuilder.Metadata.GetDiscriminatorValue());
+        Assert.Null(baseTypeBuilder.Metadata[CoreAnnotationNames.DiscriminatorValue]);
+        Assert.Null(entityTypeBuilder.Metadata[CoreAnnotationNames.DiscriminatorValue]);
     }
 
     [ConditionalFact]
@@ -126,7 +126,7 @@ public class DiscriminatorConventionTest
     {
         var entityTypeBuilder = CreateInternalEntityTypeBuilder<Entity>();
 
-        new EntityTypeBuilder(entityTypeBuilder.Metadata).HasDiscriminator("T", typeof(string));
+        new EntityTypeBuilder(entityTypeBuilder.Metadata).HasDiscriminator("T", typeof(int));
 
         var baseTypeBuilder = entityTypeBuilder.ModelBuilder.Entity(typeof(EntityBase), ConfigurationSource.Convention);
         entityTypeBuilder.HasBaseType(baseTypeBuilder.Metadata, ConfigurationSource.Convention);
@@ -135,8 +135,8 @@ public class DiscriminatorConventionTest
 
         Assert.Null(((IReadOnlyEntityType)entityTypeBuilder.Metadata).FindDiscriminatorProperty());
         Assert.Null(((IReadOnlyEntityType)baseTypeBuilder.Metadata).FindDiscriminatorProperty());
-        Assert.Null(baseTypeBuilder.Metadata.GetDiscriminatorValue());
-        Assert.Null(entityTypeBuilder.Metadata.GetDiscriminatorValue());
+        Assert.Null(baseTypeBuilder.Metadata[CoreAnnotationNames.DiscriminatorValue]);
+        Assert.Null(entityTypeBuilder.Metadata[CoreAnnotationNames.DiscriminatorValue]);
 
         entityTypeBuilder.HasBaseType((Type)null, ConfigurationSource.DataAnnotation);
 
@@ -160,9 +160,7 @@ public class DiscriminatorConventionTest
     private ProviderConventionSetBuilderDependencies CreateDependencies()
         => InMemoryTestHelpers.Instance.CreateContextServices().GetRequiredService<ProviderConventionSetBuilderDependencies>();
 
-    private class EntityBase
-    {
-    }
+    private class EntityBase;
 
     private class Entity : EntityBase
     {
@@ -171,9 +169,7 @@ public class DiscriminatorConventionTest
         public string Name { get; set; }
     }
 
-    private class DerivedEntity : Entity
-    {
-    }
+    private class DerivedEntity : Entity;
 
     private static InternalEntityTypeBuilder CreateInternalEntityTypeBuilder<T>()
     {

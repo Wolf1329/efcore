@@ -51,7 +51,18 @@ public partial class DbContextTest
         changeDetector.DetectChangesCalled = false;
 
         var entry = context.Attach(
-            new Product { Id = 1, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = 1,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
 
         entry.Entity.Name = "Big Hedgehogs";
 
@@ -78,7 +89,18 @@ public partial class DbContextTest
         changeDetector.DetectChangesCalled = false;
 
         var entry = context.Attach(
-            new Product { Id = 1, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = 1,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
 
         entry.Entity.Name = "Big Hedgehogs";
 
@@ -148,7 +170,17 @@ public partial class DbContextTest
                 new ServiceCollection().AddSingleton<ILoggerFactory>(loggerFactory));
 
         using var context = new ButTheHedgehogContext(provider);
-        context.Products.Add(new Product());
+        context.Products.Add(
+            new Product
+            {
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => context.SaveChangesAsync(new CancellationToken(canceled: true)));
 
@@ -199,6 +231,45 @@ public partial class DbContextTest
         }
 
         public virtual void Resume()
+        {
+        }
+
+        public (EventHandler<DetectChangesEventArgs> DetectingAllChanges,
+            EventHandler<DetectedChangesEventArgs> DetectedAllChanges,
+            EventHandler<DetectEntityChangesEventArgs> DetectingEntityChanges,
+            EventHandler<DetectedEntityChangesEventArgs>
+            DetectedEntityChanges) CaptureEvents()
+            => (null, null, null, null);
+
+        public void SetEvents(
+            EventHandler<DetectChangesEventArgs> detectingAllChanges,
+            EventHandler<DetectedChangesEventArgs> detectedAllChanges,
+            EventHandler<DetectEntityChangesEventArgs> detectingEntityChanges,
+            EventHandler<DetectedEntityChangesEventArgs> detectedEntityChanges)
+        {
+        }
+
+        public event EventHandler<DetectEntityChangesEventArgs> DetectingEntityChanges;
+
+        public void OnDetectingEntityChanges(InternalEntityEntry internalEntityEntry)
+            => DetectingEntityChanges?.Invoke(null, null);
+
+        public event EventHandler<DetectChangesEventArgs> DetectingAllChanges;
+
+        public void OnDetectingAllChanges(IStateManager stateManager)
+            => DetectingAllChanges?.Invoke(null, null);
+
+        public event EventHandler<DetectedEntityChangesEventArgs> DetectedEntityChanges;
+
+        public void OnDetectedEntityChanges(InternalEntityEntry internalEntityEntry, bool changesFound)
+            => DetectedEntityChanges?.Invoke(null, null);
+
+        public event EventHandler<DetectedChangesEventArgs> DetectedAllChanges;
+
+        public void OnDetectedAllChanges(IStateManager stateManager, bool changesFound)
+            => DetectedAllChanges?.Invoke(null, null);
+
+        public void ResetState()
         {
         }
     }
@@ -288,23 +359,31 @@ public partial class DbContextTest
     {
         using var context = new EarlyLearningCenter(InMemoryTestHelpers.Instance.CreateServiceProvider());
         Assert.Equal(
-            new[] { typeof(Category).FullName, typeof(Product).FullName, typeof(TheGu).FullName },
+            new[]
+            {
+                typeof(Category).FullName,
+                typeof(CategoryWithSentinel).FullName,
+                typeof(Product).FullName,
+                typeof(ProductWithSentinel).FullName,
+                typeof(TheGu).FullName,
+                typeof(TheGuWithSentinel).FullName
+            },
             context.Model.GetEntityTypes().Select(e => e.Name).ToArray());
 
-        var categoryType = context.Model.FindEntityType(typeof(Category));
-        Assert.Equal("Id", categoryType.FindPrimaryKey().Properties.Single().Name);
+        var categoryType = context.Model.FindEntityType(typeof(Category))!;
+        Assert.Equal("Id", categoryType.FindPrimaryKey()!.Properties.Single().Name);
         Assert.Equal(
             new[] { "Id", "Name" },
             categoryType.GetProperties().Select(p => p.Name).ToArray());
 
-        var productType = context.Model.FindEntityType(typeof(Product));
-        Assert.Equal("Id", productType.FindPrimaryKey().Properties.Single().Name);
+        var productType = context.Model.FindEntityType(typeof(Product))!;
+        Assert.Equal("Id", productType.FindPrimaryKey()!.Properties.Single().Name);
         Assert.Equal(
             new[] { "Id", "CategoryId", "Name", "Price" },
             productType.GetProperties().Select(p => p.Name).ToArray());
 
-        var guType = context.Model.FindEntityType(typeof(TheGu));
-        Assert.Equal("Id", guType.FindPrimaryKey().Properties.Single().Name);
+        var guType = context.Model.FindEntityType(typeof(TheGu))!;
+        Assert.Equal("Id", guType.FindPrimaryKey()!.Properties.Single().Name);
         Assert.Equal(
             new[] { "Id", "ShirtColor" },
             guType.GetProperties().Select(p => p.Name).ToArray());
@@ -359,14 +438,9 @@ public partial class DbContextTest
             Assert.Throws<InvalidOperationException>(() => context.Model).Message);
     }
 
-    private class UseModelInOnModelCreatingContext : DbContext
+    private class UseModelInOnModelCreatingContext(IServiceProvider serviceProvider) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-
-        public UseModelInOnModelCreatingContext(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
 
         public DbSet<Product> Products { get; set; }
 
@@ -393,14 +467,9 @@ public partial class DbContextTest
             Assert.Throws<InvalidOperationException>(() => context.Products.ToList()).Message);
     }
 
-    private class UseInOnModelCreatingContext : DbContext
+    private class UseInOnModelCreatingContext(IServiceProvider serviceProvider) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-
-        public UseInOnModelCreatingContext(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
 
         public DbSet<Product> Products { get; set; }
 
@@ -427,14 +496,9 @@ public partial class DbContextTest
             Assert.Throws<InvalidOperationException>(() => context.Products.ToList()).Message);
     }
 
-    private class UseInOnConfiguringContext : DbContext
+    private class UseInOnConfiguringContext(IServiceProvider serviceProvider) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-
-        public UseInOnConfiguringContext(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
 
         public DbSet<Product> Products { get; set; }
 
@@ -460,8 +524,19 @@ public partial class DbContextTest
         {
             Assert.True(context.ChangeTracker.AutoDetectChangesEnabled);
 
-            var product = context.Add(
-                new Product { Id = 1, Name = "Little Hedgehogs" }).Entity;
+            var product = (await context.AddAsync(
+                new Product
+                {
+                    Id = 1,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                })).Entity;
 
             if (async)
             {
@@ -476,17 +551,12 @@ public partial class DbContextTest
 
             if (async)
             {
-                await context.SaveChangesAsync();
+                Assert.Equal(1, await context.SaveChangesAsync());
             }
             else
             {
-                context.SaveChanges();
+                Assert.Equal(1, context.SaveChanges());
             }
-        }
-
-        using (var context = new ButTheHedgehogContext(provider))
-        {
-            Assert.Equal("Cracked Cookies", context.Products.Single().Name);
         }
     }
 
@@ -502,8 +572,19 @@ public partial class DbContextTest
             context.ChangeTracker.AutoDetectChangesEnabled = false;
             Assert.False(context.ChangeTracker.AutoDetectChangesEnabled);
 
-            var product = context.Add(
-                new Product { Id = 1, Name = "Little Hedgehogs" }).Entity;
+            var product = (await context.AddAsync(
+                new Product
+                {
+                    Id = 1,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                })).Entity;
 
             if (async)
             {
@@ -518,28 +599,18 @@ public partial class DbContextTest
 
             if (async)
             {
-                await context.SaveChangesAsync();
+                Assert.Equal(0, await context.SaveChangesAsync());
             }
             else
             {
-                context.SaveChanges();
+                Assert.Equal(0, context.SaveChanges());
             }
-        }
-
-        using (var context = new ButTheHedgehogContext(provider))
-        {
-            Assert.Equal("Little Hedgehogs", context.Products.Single().Name);
         }
     }
 
-    private class ButTheHedgehogContext : DbContext
+    private class ButTheHedgehogContext(IServiceProvider serviceProvider) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-
-        public ButTheHedgehogContext(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
 
         public DbSet<Product> Products { get; set; }
 
@@ -552,11 +623,93 @@ public partial class DbContextTest
     [ConditionalTheory]
     [InlineData(false)]
     [InlineData(true)]
+    public void DetectChanges_is_called_for_cascade_delete_unless_disabled(bool autoDetectChangesEnabled)
+    {
+        var detectedChangesFor = new List<object>();
+
+        using var context = new EarlyLearningCenter();
+        context.ChangeTracker.DetectingEntityChanges += (_, args) =>
+        {
+            detectedChangesFor.Add(args.Entry.Entity);
+        };
+
+        context.ChangeTracker.AutoDetectChangesEnabled = autoDetectChangesEnabled;
+
+        var products = new List<Product>
+        {
+            new()
+            {
+                Id = 1,
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            },
+            new()
+            {
+                Id = 2,
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            }
+        };
+        var category = context.Attach(
+            new Category
+            {
+                Id = 1,
+                Products = products,
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            }).Entity;
+
+        Assert.Empty(detectedChangesFor);
+
+        context.Remove(category);
+
+        if (autoDetectChangesEnabled)
+        {
+            Assert.Equal(4, detectedChangesFor.Count);
+            Assert.Contains(products[0], detectedChangesFor);
+            Assert.Contains(products[1], detectedChangesFor);
+            Assert.Equal(2, detectedChangesFor.Count(e => ReferenceEquals(e, category)));
+        }
+        else
+        {
+            Assert.Empty(detectedChangesFor);
+        }
+    }
+
+    [ConditionalTheory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void Entry_calls_DetectChanges_by_default(bool useGenericOverload)
     {
         using var context = new ButTheHedgehogContext(InMemoryTestHelpers.Instance.CreateServiceProvider());
         var entry = context.Attach(
-            new Product { Id = 1, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = 1,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
 
         entry.Entity.Name = "Cracked Cookies";
 
@@ -583,7 +736,18 @@ public partial class DbContextTest
         context.ChangeTracker.AutoDetectChangesEnabled = false;
 
         var entry = context.Attach(
-            new Product { Id = 1, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = 1,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
 
         entry.Entity.Name = "Cracked Cookies";
 
@@ -615,65 +779,425 @@ public partial class DbContextTest
         changeDetector.DetectChangesCalled = false;
 
         context.Add(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.Add(
-            (object)new Product { Id = id++, Name = "Little Hedgehogs" });
+            (object)new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.AddRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.AddRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.AddRange(
-            new List<Product> { new() { Id = id++, Name = "Little Hedgehogs" } });
+            new List<Product>
+            {
+                new()
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.AddRange(
-            new List<object> { new Product { Id = id++, Name = "Little Hedgehogs" } });
+            new List<object>
+            {
+                new Product
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         await context.AddAsync(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         await context.AddAsync(
-            (object)new Product { Id = id++, Name = "Little Hedgehogs" });
+            (object)new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         await context.AddRangeAsync(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         await context.AddRangeAsync(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         await context.AddRangeAsync(
-            new List<Product> { new() { Id = id++, Name = "Little Hedgehogs" } });
+            new List<Product>
+            {
+                new()
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         await context.AddRangeAsync(
-            new List<object> { new Product { Id = id++, Name = "Little Hedgehogs" } });
+            new List<object>
+            {
+                new Product
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.Attach(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.Attach(
-            (object)new Product { Id = id++, Name = "Little Hedgehogs" });
+            (object)new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.AttachRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.AttachRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.AttachRange(
-            new List<Product> { new() { Id = id++, Name = "Little Hedgehogs" } });
+            new List<Product>
+            {
+                new()
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.AttachRange(
-            new List<object> { new Product { Id = id++, Name = "Little Hedgehogs" } });
+            new List<object>
+            {
+                new Product
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.Update(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.Update(
-            (object)new Product { Id = id++, Name = "Little Hedgehogs" });
+            (object)new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.UpdateRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.UpdateRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.UpdateRange(
-            new List<Product> { new() { Id = id++, Name = "Little Hedgehogs" } });
+            new List<Product>
+            {
+                new()
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.UpdateRange(
-            new List<object> { new Product { Id = id++, Name = "Little Hedgehogs" } });
+            new List<object>
+            {
+                new Product
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.Remove(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.Remove(
-            (object)new Product { Id = id++, Name = "Little Hedgehogs" });
+            (object)new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.RemoveRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.RemoveRange(
-            new Product { Id = id++, Name = "Little Hedgehogs" });
+            new Product
+            {
+                Id = id++,
+                Name = "Little Hedgehogs",
+                Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                Tag = new Tag
+                {
+                    Name = "Tanavast",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                    Notes = ["A", "B"]
+                }
+            });
         context.RemoveRange(
-            new List<Product> { new() { Id = id++, Name = "Little Hedgehogs" } });
+            new List<Product>
+            {
+                new()
+                {
+                    Id = id++,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
         context.RemoveRange(
-            new List<object> { new Product { Id = id, Name = "Little Hedgehogs" } });
+            new List<object>
+            {
+                new Product
+                {
+                    Id = id,
+                    Name = "Little Hedgehogs",
+                    Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7146") },
+                    Tag = new Tag
+                    {
+                        Name = "Tanavast",
+                        Stamp = new Stamp { Code = new Guid("984ade3c-2f7b-4651-a351-642e92ab7147") },
+                        Notes = ["A", "B"]
+                    }
+                }
+            });
 
         Assert.False(changeDetector.DetectChangesCalled);
 
@@ -682,15 +1206,10 @@ public partial class DbContextTest
         Assert.True(changeDetector.DetectChangesCalled);
     }
 
-    private class ChangeDetectorProxy : ChangeDetector
+    private class ChangeDetectorProxy(
+        IDiagnosticsLogger<DbLoggerCategory.ChangeTracking> logger,
+        ILoggingOptions loggingOptions) : ChangeDetector(logger, loggingOptions)
     {
-        public ChangeDetectorProxy(
-            IDiagnosticsLogger<DbLoggerCategory.ChangeTracking> logger,
-            ILoggingOptions loggingOptions)
-            : base(logger, loggingOptions)
-        {
-        }
-
         public bool DetectChangesCalled { get; set; }
 
         public override void DetectChanges(InternalEntityEntry entry)
@@ -816,12 +1335,8 @@ public partial class DbContextTest
 
     public class FakeServiceProvider : IServiceProvider, IDisposable
     {
-        private readonly IServiceProvider _realProvider;
-
-        public FakeServiceProvider()
-        {
-            _realProvider = new ServiceCollection().AddEntityFrameworkInMemoryDatabase().BuildServiceProvider(validateScopes: true);
-        }
+        private readonly IServiceProvider _realProvider =
+            new ServiceCollection().AddEntityFrameworkInMemoryDatabase().BuildServiceProvider(validateScopes: true);
 
         public bool Disposed { get; set; }
 

@@ -14,7 +14,7 @@ namespace Microsoft.EntityFrameworkCore.Metadata;
 /// <remarks>
 ///     See <see href="https://aka.ms/efcore-docs-modeling">Modeling entity types and relationships</see> for more information and examples.
 /// </remarks>
-public class RuntimeForeignKey : AnnotatableBase, IRuntimeForeignKey
+public class RuntimeForeignKey : RuntimeAnnotatableBase, IRuntimeForeignKey
 {
     private readonly DeleteBehavior _deleteBehavior;
     private readonly bool _isUnique;
@@ -22,7 +22,7 @@ public class RuntimeForeignKey : AnnotatableBase, IRuntimeForeignKey
     private readonly bool _isRequiredDependent;
     private readonly bool _isOwnership;
 
-    private object? _dependentKeyValueFactory;
+    private IDependentKeyValueFactory? _dependentKeyValueFactory;
     private Func<IDependentsMap>? _dependentsMapFactory;
 
     /// <summary>
@@ -259,12 +259,17 @@ public class RuntimeForeignKey : AnnotatableBase, IRuntimeForeignKey
 
     /// <inheritdoc />
     [DebuggerStepThrough]
-    IDependentKeyValueFactory<TKey>? IForeignKey.GetDependentKeyValueFactory<TKey>()
-        => (IDependentKeyValueFactory<TKey>?)((IRuntimeForeignKey)this).DependentKeyValueFactory;
+    IDependentKeyValueFactory<TKey> IForeignKey.GetDependentKeyValueFactory<TKey>()
+        => (IDependentKeyValueFactory<TKey>)_dependentKeyValueFactory!;
 
-    // Note: This is set and used only by IdentityMapFactoryFactory, which ensures thread-safety
     /// <inheritdoc />
-    object IRuntimeForeignKey.DependentKeyValueFactory
+    [DebuggerStepThrough]
+    IDependentKeyValueFactory IForeignKey.GetDependentKeyValueFactory()
+        => _dependentKeyValueFactory!;
+
+    // Note: This is set and used only by KeyValueFactoryFactory, which ensures thread-safety
+    /// <inheritdoc />
+    IDependentKeyValueFactory IRuntimeForeignKey.DependentKeyValueFactory
     {
         [DebuggerStepThrough]
         get => _dependentKeyValueFactory!;
@@ -273,7 +278,7 @@ public class RuntimeForeignKey : AnnotatableBase, IRuntimeForeignKey
         set => _dependentKeyValueFactory = value;
     }
 
-    // Note: This is set and used only by IdentityMapFactoryFactory, which ensures thread-safety
+    // Note: This is set and used only by KeyValueFactoryFactory, which ensures thread-safety
     /// <inheritdoc />
     Func<IDependentsMap> IRuntimeForeignKey.DependentsMapFactory
     {

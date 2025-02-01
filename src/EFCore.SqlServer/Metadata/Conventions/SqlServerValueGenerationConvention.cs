@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.SqlServer.Metadata.Internal;
 
 // ReSharper disable once CheckNamespace
@@ -14,7 +15,7 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Conventions;
 /// </summary>
 /// <remarks>
 ///     See <see href="https://aka.ms/efcore-docs-conventions">Model building conventions</see>, and
-///     <see href="https://aka.ms/efcore-docs-sqlserver">Accessing SQL Server and SQL Azure databases with EF Core</see>
+///     <see href="https://aka.ms/efcore-docs-sqlserver">Accessing SQL Server and Azure SQL databases with EF Core</see>
 ///     for more information and examples.
 /// </remarks>
 public class SqlServerValueGenerationConvention : RelationalValueGenerationConvention
@@ -70,8 +71,7 @@ public class SqlServerValueGenerationConvention : RelationalValueGenerationConve
         IConventionAnnotation? oldAnnotation,
         IConventionContext<IConventionAnnotation> context)
     {
-        if ((name == SqlServerAnnotationNames.TemporalPeriodStartPropertyName
-                || name == SqlServerAnnotationNames.TemporalPeriodEndPropertyName)
+        if (name is SqlServerAnnotationNames.TemporalPeriodStartPropertyName or SqlServerAnnotationNames.TemporalPeriodEndPropertyName
             && annotation?.Value is string propertyName)
         {
             var periodProperty = entityTypeBuilder.Metadata.FindProperty(propertyName);
@@ -96,16 +96,25 @@ public class SqlServerValueGenerationConvention : RelationalValueGenerationConve
     /// <returns>The store value generation strategy to set for the given property.</returns>
     protected override ValueGenerated? GetValueGenerated(IConventionProperty property)
     {
-        var tableName = property.DeclaringEntityType.GetTableName();
-        if (tableName == null)
+        // TODO: move to relational?
+        if (property.DeclaringType.IsMappedToJson()
+#pragma warning disable EF1001 // Internal EF Core API usage.
+            && property.IsOrdinalKeyProperty()
+#pragma warning restore EF1001 // Internal EF Core API usage.
+            && (property.DeclaringType as IReadOnlyEntityType)?.FindOwnership()!.IsUnique == false)
+        {
+            return ValueGenerated.OnAdd;
+        }
+
+        var declaringTable = property.GetMappedStoreObjects(StoreObjectType.Table).FirstOrDefault();
+        if (declaringTable.Name == null)
         {
             return null;
         }
 
-        return GetValueGenerated(
-            property,
-            StoreObjectIdentifier.Table(tableName, property.DeclaringEntityType.GetSchema()),
-            Dependencies.TypeMappingSource);
+        // If the first mapping can be value generated then we'll consider all mappings to be value generated
+        // as this is a client-side configuration and can't be specified per-table.
+        return GetValueGenerated(property, declaringTable, Dependencies.TypeMappingSource);
     }
 
     /// <summary>
@@ -132,8 +141,9 @@ public class SqlServerValueGenerationConvention : RelationalValueGenerationConve
 
     private static ValueGenerated? GetTemporalValueGenerated(IReadOnlyProperty property)
     {
-        var entityType = property.DeclaringEntityType;
-        return entityType.IsTemporal()
+        var entityType = property.DeclaringType as IReadOnlyEntityType;
+        return entityType != null
+            && entityType.IsTemporal()
             && (entityType.GetPeriodStartPropertyName() == property.Name
                 || entityType.GetPeriodEndPropertyName() == property.Name)
                 ? ValueGenerated.OnAddOrUpdate

@@ -1,7 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Microsoft.EntityFrameworkCore.ChangeTracking.Internal;
 using Microsoft.EntityFrameworkCore.Design.Internal;
 using Microsoft.EntityFrameworkCore.Infrastructure.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
@@ -71,7 +70,7 @@ public class MigrationsScaffolderTest
                 new FakeDiagnosticsLogger<DbLoggerCategory.Migrations>());
         var historyRepository = new MockHistoryRepository();
 
-        var services = RelationalTestHelpers.Instance.CreateContextServices();
+        var services = FakeRelationalTestHelpers.Instance.CreateContextServices();
         var model = new Model().FinalizeModel();
         model.AddRuntimeAnnotation(RelationalAnnotationNames.RelationalModel, new RelationalModel(model));
 
@@ -86,26 +85,26 @@ public class MigrationsScaffolderTest
                         TestServiceFactory.Instance.Create<RelationalTypeMappingSourceDependencies>()),
                     new MigrationsAnnotationProvider(
                         new MigrationsAnnotationProviderDependencies()),
-                    services.GetRequiredService<IChangeDetector>(),
-                    services.GetRequiredService<IUpdateAdapterFactory>(),
+                    new RelationalAnnotationProvider(
+                        new RelationalAnnotationProviderDependencies()),
+                    services.GetRequiredService<IRowIdentityMapFactory>(),
                     services.GetRequiredService<CommandBatchPreparerDependencies>()),
                 idGenerator,
                 new MigrationsCodeGeneratorSelector(
-                    new[]
-                    {
-                        new CSharpMigrationsGenerator(
-                            new MigrationsCodeGeneratorDependencies(
-                                sqlServerTypeMappingSource,
-                                sqlServerAnnotationCodeGenerator),
-                            new CSharpMigrationsGeneratorDependencies(
-                                code,
-                                new CSharpMigrationOperationGenerator(
-                                    new CSharpMigrationOperationGeneratorDependencies(
-                                        code)),
-                                new CSharpSnapshotGenerator(
-                                    new CSharpSnapshotGeneratorDependencies(
-                                        code, sqlServerTypeMappingSource, sqlServerAnnotationCodeGenerator))))
-                    }),
+                [
+                    new CSharpMigrationsGenerator(
+                        new MigrationsCodeGeneratorDependencies(
+                            sqlServerTypeMappingSource,
+                            sqlServerAnnotationCodeGenerator),
+                        new CSharpMigrationsGeneratorDependencies(
+                            code,
+                            new CSharpMigrationOperationGenerator(
+                                new CSharpMigrationOperationGeneratorDependencies(
+                                    code)),
+                            new CSharpSnapshotGenerator(
+                                new CSharpSnapshotGeneratorDependencies(
+                                    code, sqlServerTypeMappingSource, sqlServerAnnotationCodeGenerator))))
+                ]),
                 historyRepository,
                 reporter,
                 new MockProvider(),
@@ -123,17 +122,17 @@ public class MigrationsScaffolderTest
                     services.GetRequiredService<IModelRuntimeInitializer>(),
                     services.GetRequiredService<IDiagnosticsLogger<DbLoggerCategory.Migrations>>(),
                     services.GetRequiredService<IRelationalCommandDiagnosticsLogger>(),
-                    services.GetRequiredService<IDatabaseProvider>())));
+                    services.GetRequiredService<IDatabaseProvider>(),
+                    services.GetRequiredService<IMigrationsModelDiffer>(),
+                    services.GetRequiredService<IDesignTimeModel>(),
+                    services.GetRequiredService<IDbContextOptions>(),
+                    services.GetRequiredService<IExecutionStrategy>())));
     }
 
     // ReSharper disable once UnusedTypeParameter
-    private class GenericContext<T> : DbContext
-    {
-    }
+    private class GenericContext<T> : DbContext;
 
-    private class ContextWithSnapshot : DbContext
-    {
-    }
+    private class ContextWithSnapshot : DbContext;
 
     [DbContext(typeof(ContextWithSnapshot))]
     private class ContextWithSnapshotModelSnapshot : ModelSnapshot
@@ -145,6 +144,8 @@ public class MigrationsScaffolderTest
 
     private class MockHistoryRepository : IHistoryRepository
     {
+        public virtual LockReleaseBehavior LockReleaseBehavior => LockReleaseBehavior.Explicit;
+
         public string GetBeginIfExistsScript(string migrationId)
             => null;
 
@@ -177,6 +178,18 @@ public class MigrationsScaffolderTest
 
         public string GetInsertScript(HistoryRow row)
             => null;
+
+        public void Create()
+            => throw new NotImplementedException();
+
+        public Task CreateAsync(CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public IMigrationsDatabaseLock AcquireDatabaseLock()
+            => throw new NotImplementedException();
+
+        public Task<IMigrationsDatabaseLock> AcquireDatabaseLockAsync(CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
     }
 
     private class MockProvider : IDatabaseProvider

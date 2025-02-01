@@ -3,14 +3,12 @@
 
 namespace Microsoft.EntityFrameworkCore;
 
-public class GraphUpdatesSqlServerClientNoActionTest : GraphUpdatesSqlServerTestBase<
-    GraphUpdatesSqlServerClientNoActionTest.SqlServerFixture>
-{
-    public GraphUpdatesSqlServerClientNoActionTest(SqlServerFixture fixture)
-        : base(fixture)
-    {
-    }
+#nullable disable
 
+public class GraphUpdatesSqlServerClientNoActionTest(GraphUpdatesSqlServerClientNoActionTest.SqlServerFixture fixture)
+    : GraphUpdatesSqlServerTestBase<
+        GraphUpdatesSqlServerClientNoActionTest.SqlServerFixture>(fixture)
+{
     protected override void UseTransaction(DatabaseFacade facade, IDbContextTransaction transaction)
         => facade.UseTransaction(transaction.GetDbTransaction());
 
@@ -19,7 +17,8 @@ public class GraphUpdatesSqlServerClientNoActionTest : GraphUpdatesSqlServerTest
         public override bool ForceClientNoAction
             => true;
 
-        protected override string StoreName { get; } = "GraphClientNoActionUpdatesTest";
+        protected override string StoreName
+            => "GraphClientNoActionUpdatesTest";
 
         protected override void OnModelCreating(ModelBuilder modelBuilder, DbContext context)
         {

@@ -10,9 +10,8 @@ using Microsoft.EntityFrameworkCore.InMemory.Internal;
 // ReSharper disable UnusedMember.Local
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore.Query;
-#pragma warning disable xUnit1000 // Test classes must be public
-internal class WarningsTest
-#pragma warning restore xUnit1000 // Test classes must be public
+
+public class WarningsTest
 {
     [ConditionalFact]
     public void Should_throw_by_default_when_transaction()
@@ -208,6 +207,8 @@ internal class WarningsTest
                     .GenerateMessage("WarningAsErrorEntity", "Nav"),
                 loggerFactory.Log.Select(l => l.Message));
 
+            var entityEntry = context.Entry(entity);
+            Assert.True(entityEntry.Navigation("Nav").IsLoaded);
             loggerFactory.Clear();
             Assert.NotNull(entity.Nav);
             Assert.DoesNotContain(
@@ -229,27 +230,18 @@ internal class WarningsTest
         context.WarningAsErrorEntities.FirstOrDefault();
     }
 
-    private class WarningAsErrorContext : DbContext
+    private class WarningAsErrorContext(
+        IServiceProvider serviceProvider,
+        bool defaultThrow = true,
+        EventId? toLog = null,
+        EventId? toThrow = null,
+        (EventId Id, LogLevel Level)? toChangeLevel = null) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-        private readonly bool _defaultThrow;
-        private readonly EventId? _toLog;
-        private readonly EventId? _toThrow;
-        private readonly (EventId Id, LogLevel Level)? _toChangeLevel;
-
-        public WarningAsErrorContext(
-            IServiceProvider serviceProvider,
-            bool defaultThrow = true,
-            EventId? toLog = null,
-            EventId? toThrow = null,
-            (EventId Id, LogLevel Level)? toChangeLevel = null)
-        {
-            _serviceProvider = serviceProvider;
-            _defaultThrow = defaultThrow;
-            _toLog = toLog;
-            _toThrow = toThrow;
-            _toChangeLevel = toChangeLevel;
-        }
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
+        private readonly bool _defaultThrow = defaultThrow;
+        private readonly EventId? _toLog = toLog;
+        private readonly EventId? _toThrow = toThrow;
+        private readonly (EventId Id, LogLevel Level)? _toChangeLevel = toChangeLevel;
 
         public DbSet<WarningAsErrorEntity> WarningAsErrorEntities { get; set; }
 
@@ -294,9 +286,7 @@ internal class WarningsTest
         }
 
         private WarningAsErrorEntity(Action<object, string> lazyLoader)
-        {
-            _loader = lazyLoader;
-        }
+            => _loader = lazyLoader;
 
         public IncludedEntity Nav
         {

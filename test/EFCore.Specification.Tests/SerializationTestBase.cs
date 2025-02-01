@@ -3,22 +3,18 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.TestModels.ConcurrencyModel;
 using Newtonsoft.Json;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace Microsoft.EntityFrameworkCore;
 
-public abstract class SerializationTestBase<TFixture> : IClassFixture<TFixture>
+#nullable disable
+
+public abstract class SerializationTestBase<TFixture>(TFixture fixture) : IClassFixture<TFixture>
     where TFixture : F1FixtureBase<byte[]>, new()
 {
-    protected SerializationTestBase(TFixture fixture)
-    {
-        Fixture = fixture;
-    }
-
-    protected TFixture Fixture { get; }
+    protected TFixture Fixture { get; } = fixture;
 
     [ConditionalTheory]
     [InlineData(false, false, false)]
@@ -31,9 +27,7 @@ public abstract class SerializationTestBase<TFixture> : IClassFixture<TFixture>
     {
         using var context = Fixture.CreateContext();
 
-        var teams = context.Teams.Include(e => e.Drivers)
-            .Include(e => e.Engine).ThenInclude(e => e.EngineSupplier)
-            .ToList();
+        var teams = context.Teams.ToList();
 
         Assert.Equal(12, teams.Count);
         Assert.Equal(42, teams.SelectMany(e => e.Drivers).Count());
@@ -142,7 +136,7 @@ public abstract class SerializationTestBase<TFixture> : IClassFixture<TFixture>
             ReferenceLoopHandling = ignoreLoops
                 ? ReferenceLoopHandling.Ignore
                 : ReferenceLoopHandling.Error,
-            EqualityComparer = LegacyReferenceEqualityComparer.Instance,
+            EqualityComparer = ReferenceEqualityComparer.Instance,
             Formatting = writeIndented
                 ? Formatting.Indented
                 : Formatting.None

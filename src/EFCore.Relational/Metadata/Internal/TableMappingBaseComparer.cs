@@ -47,25 +47,71 @@ public sealed class TableMappingBaseComparer : IEqualityComparer<ITableMappingBa
             return 1;
         }
 
-        var result = y.IsSharedTablePrincipal.CompareTo(x.IsSharedTablePrincipal);
-        if (result != 0)
+        var result = 0;
+        if (y.IsSharedTablePrincipal == null)
         {
-            return result;
+            if (x.IsSharedTablePrincipal != null)
+            {
+                return 1;
+            }
+        }
+        else
+        {
+            if (x.IsSharedTablePrincipal == null)
+            {
+                return -1;
+            }
+
+            result = y.IsSharedTablePrincipal.Value.CompareTo(x.IsSharedTablePrincipal.Value);
+            if (result != 0)
+            {
+                return result;
+            }
         }
 
-        result = y.IncludesDerivedTypes.CompareTo(x.IncludesDerivedTypes);
-        if (result != 0)
+        if (y.IncludesDerivedTypes == null)
         {
-            return result;
+            if (x.IncludesDerivedTypes != null)
+            {
+                return -1;
+            }
+        }
+        else
+        {
+            if (x.IncludesDerivedTypes == null)
+            {
+                return 1;
+            }
+
+            result = y.IncludesDerivedTypes.Value.CompareTo(x.IncludesDerivedTypes.Value);
+            if (result != 0)
+            {
+                return result;
+            }
         }
 
-        result = y.IsSplitEntityTypePrincipal.CompareTo(x.IsSplitEntityTypePrincipal);
-        if (result != 0)
+        if (y.IsSplitEntityTypePrincipal == null)
         {
-            return result;
+            if (x.IsSplitEntityTypePrincipal != null)
+            {
+                return -1;
+            }
+        }
+        else
+        {
+            if (x.IsSplitEntityTypePrincipal == null)
+            {
+                return 1;
+            }
+
+            result = y.IsSplitEntityTypePrincipal.Value.CompareTo(x.IsSplitEntityTypePrincipal.Value);
+            if (result != 0)
+            {
+                return result;
+            }
         }
 
-        result = EntityTypeFullNameComparer.Instance.Compare(x.EntityType, y.EntityType);
+        result = TypeBaseNameComparer.Instance.Compare(x.TypeBase, y.TypeBase);
         if (result != 0)
         {
             return result;
@@ -108,7 +154,7 @@ public sealed class TableMappingBaseComparer : IEqualityComparer<ITableMappingBa
         => ReferenceEquals(x, y)
             || x is not null
             && y is not null
-            && (x.EntityType == y.EntityType
+            && (x.TypeBase == y.TypeBase
                 && x.Table == y.Table
                 && x.IncludesDerivedTypes == y.IncludesDerivedTypes
                 && x.ColumnMappings.SequenceEqual(y.ColumnMappings));
@@ -122,7 +168,7 @@ public sealed class TableMappingBaseComparer : IEqualityComparer<ITableMappingBa
     public int GetHashCode(ITableMappingBase obj)
     {
         var hashCode = new HashCode();
-        hashCode.Add(obj.EntityType, EntityTypeFullNameComparer.Instance);
+        hashCode.Add(obj.TypeBase, TypeBaseNameComparer.Instance);
         hashCode.Add(obj.Table.Name);
         hashCode.Add(obj.Table.Schema);
         foreach (var columnMapping in obj.ColumnMappings)

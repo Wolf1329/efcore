@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
@@ -32,7 +34,8 @@ public class RuntimeNavigation : RuntimePropertyBase, INavigation
         FieldInfo? fieldInfo,
         RuntimeForeignKey foreignKey,
         PropertyAccessMode propertyAccessMode,
-        bool eagerLoaded)
+        bool eagerLoaded,
+        bool lazyLoadingEnabled)
         : base(name, propertyInfo, fieldInfo, propertyAccessMode)
     {
         ClrType = clrType;
@@ -41,11 +44,17 @@ public class RuntimeNavigation : RuntimePropertyBase, INavigation
         {
             SetAnnotation(CoreAnnotationNames.EagerLoaded, true);
         }
+
+        if (!lazyLoadingEnabled)
+        {
+            SetAnnotation(CoreAnnotationNames.LazyLoadingEnabled, false);
+        }
     }
 
     /// <summary>
     ///     Gets the type of value that this navigation holds.
     /// </summary>
+    [DynamicallyAccessedMembers(IProperty.DynamicallyAccessedMemberTypes)]
     protected override Type ClrType { get; }
 
     /// <summary>
@@ -56,10 +65,46 @@ public class RuntimeNavigation : RuntimePropertyBase, INavigation
     /// <summary>
     ///     Gets the entity type that this navigation property belongs to.
     /// </summary>
-    public override RuntimeEntityType DeclaringEntityType
+    public virtual RuntimeEntityType DeclaringEntityType
     {
         [DebuggerStepThrough]
         get => ((IReadOnlyNavigation)this).IsOnDependent ? ForeignKey.DeclaringEntityType : ForeignKey.PrincipalEntityType;
+    }
+
+    /// <inheritdoc />
+    public override RuntimeTypeBase DeclaringType
+        => DeclaringEntityType;
+
+    /// <inheritdoc />
+    public override object? Sentinel
+        => null;
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    [EntityFrameworkInternal]
+    public virtual void SetCollectionAccessor<TEntity, TCollection, TElement>(
+        Func<TEntity, TCollection>? getCollection,
+        Action<TEntity, TCollection>? setCollection,
+        Action<TEntity, TCollection>? setCollectionForMaterialization,
+        Func<TEntity, Action<TEntity, TCollection>, TCollection>? createAndSetCollection,
+        Func<TCollection>? createCollection)
+        where TEntity : class
+        where TCollection : class, IEnumerable<TElement>
+        where TElement : class
+    {
+        _collectionAccessor = new ClrICollectionAccessor<TEntity, TCollection, TElement>(
+            Name,
+            ((INavigation)this).IsShadowProperty(),
+            getCollection,
+            setCollection,
+            setCollectionForMaterialization,
+            createAndSetCollection,
+            createCollection);
+        _collectionAccessorInitialized = true;
     }
 
     /// <summary>
@@ -95,9 +140,9 @@ public class RuntimeNavigation : RuntimePropertyBase, INavigation
             ref _collectionAccessor,
             ref _collectionAccessorInitialized,
             this,
-            static navigation =>
-            {
-                navigation.EnsureReadOnly();
-                return new ClrCollectionAccessorFactory().Create(navigation);
-            });
+            static navigation => ((INavigationBase)navigation).IsCollection
+                ? RuntimeFeature.IsDynamicCodeSupported
+                    ? ClrCollectionAccessorFactory.Instance.Create(navigation)
+                    : throw new InvalidOperationException(CoreStrings.NativeAotNoCompiledModel)
+                : null);
 }

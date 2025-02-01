@@ -6,21 +6,15 @@ using Microsoft.EntityFrameworkCore.TestModels.ComplexNavigationsModel;
 
 namespace Microsoft.EntityFrameworkCore.Query;
 
+#nullable disable
+
 public abstract class ComplexNavigationsSharedTypeQueryFixtureBase : ComplexNavigationsQueryFixtureBase, IQueryFixtureBase
 {
-    private ComplexNavigationsWeakData _expectedData;
-
-    protected override string StoreName { get; } = "ComplexNavigationsOwned";
+    protected override string StoreName
+        => "ComplexNavigationsOwned";
 
     public override ISetSource GetExpectedData()
-    {
-        if (_expectedData == null)
-        {
-            _expectedData = new ComplexNavigationsWeakData();
-        }
-
-        return _expectedData;
-    }
+        => ComplexNavigationsWeakData.Instance;
 
     Func<DbContext, ISetSource> IQueryFixtureBase.GetSetSourceCreator()
         => context => new ComplexNavigationsWeakSetExtractor(context);
@@ -241,17 +235,12 @@ public abstract class ComplexNavigationsSharedTypeQueryFixtureBase : ComplexNavi
             .IsRequired(false);
     }
 
-    protected override void Seed(ComplexNavigationsContext context)
-        => ComplexNavigationsData.Seed(context, tableSplitting: true);
+    protected override Task SeedAsync(ComplexNavigationsContext context)
+        => ComplexNavigationsData.SeedAsync(context, tableSplitting: true);
 
-    private class ComplexNavigationsWeakSetExtractor : ISetSource
+    private class ComplexNavigationsWeakSetExtractor(DbContext context) : ISetSource
     {
-        private readonly DbContext _context;
-
-        public ComplexNavigationsWeakSetExtractor(DbContext context)
-        {
-            _context = context;
-        }
+        private readonly DbContext _context = context;
 
         public IQueryable<TEntity> Set<TEntity>()
             where TEntity : class
@@ -289,6 +278,12 @@ public abstract class ComplexNavigationsSharedTypeQueryFixtureBase : ComplexNavi
 
     private class ComplexNavigationsWeakData : ComplexNavigationsData
     {
+        public static readonly ComplexNavigationsWeakData Instance = new();
+
+        private ComplexNavigationsWeakData()
+        {
+        }
+
         public override IQueryable<TEntity> Set<TEntity>()
         {
             if (typeof(TEntity) == typeof(Level1))

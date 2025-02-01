@@ -31,6 +31,8 @@ public static class TestEnvironment
 
     private static bool? _supportsHiddenColumns;
 
+    private static bool? _supportsSqlClr;
+
     private static bool? _supportsOnlineIndexing;
 
     private static bool? _supportsMemoryOptimizedTables;
@@ -38,6 +40,14 @@ public static class TestEnvironment
     private static bool? _supportsTemporalTablesCascadeDelete;
 
     private static bool? _supportsUtf8;
+
+    private static bool? _supportsJsonPathExpressions;
+
+    private static bool? _supportsFunctions2017;
+
+    private static bool? _supportsFunctions2019;
+
+    private static bool? _supportsFunctions2022;
 
     private static byte? _productMajorVersion;
 
@@ -59,9 +69,7 @@ public static class TestEnvironment
 
             try
             {
-                _engineEdition = GetEngineEdition();
-
-                _isAzureSqlDb = (_engineEdition == 5 || _engineEdition == 8);
+                _isAzureSqlDb = GetEngineEdition() is 5 or 8;
             }
             catch (PlatformNotSupportedException)
             {
@@ -124,10 +132,7 @@ public static class TestEnvironment
 
             try
             {
-                _engineEdition = GetEngineEdition();
-                _productMajorVersion = GetProductMajorVersion();
-
-                _supportsHiddenColumns = (_productMajorVersion >= 13 && _engineEdition != 6) || IsSqlAzure;
+                _supportsHiddenColumns = (GetProductMajorVersion() >= 13 && GetEngineEdition() != 6) || IsSqlAzure;
             }
             catch (PlatformNotSupportedException)
             {
@@ -135,6 +140,33 @@ public static class TestEnvironment
             }
 
             return _supportsHiddenColumns.Value;
+        }
+    }
+
+    public static bool IsSqlClrSupported
+    {
+        get
+        {
+            if (!IsConfigured)
+            {
+                return false;
+            }
+
+            if (_supportsSqlClr.HasValue)
+            {
+                return _supportsSqlClr.Value;
+            }
+
+            try
+            {
+                _supportsSqlClr = GetEngineEdition() != 9;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                _supportsSqlClr = false;
+            }
+
+            return _supportsSqlClr.Value;
         }
     }
 
@@ -154,9 +186,7 @@ public static class TestEnvironment
 
             try
             {
-                _engineEdition = GetEngineEdition();
-
-                _supportsOnlineIndexing = _engineEdition == 3 || IsSqlAzure;
+                _supportsOnlineIndexing = GetEngineEdition() == 3 || IsSqlAzure;
             }
             catch (PlatformNotSupportedException)
             {
@@ -222,10 +252,7 @@ public static class TestEnvironment
 
             try
             {
-                _engineEdition = GetEngineEdition();
-                _productMajorVersion = GetProductMajorVersion();
-
-                _supportsTemporalTablesCascadeDelete = (_productMajorVersion >= 14 /* && _engineEdition != 6*/) || IsSqlAzure;
+                _supportsTemporalTablesCascadeDelete = (GetProductMajorVersion() >= 14 /* && GetEngineEdition() != 6*/) || IsSqlAzure;
             }
             catch (PlatformNotSupportedException)
             {
@@ -252,9 +279,7 @@ public static class TestEnvironment
 
             try
             {
-                _productMajorVersion = GetProductMajorVersion();
-
-                _supportsUtf8 = _productMajorVersion >= 15 || IsSqlAzure;
+                _supportsUtf8 = GetProductMajorVersion() >= 15 || IsSqlAzure;
             }
             catch (PlatformNotSupportedException)
             {
@@ -265,7 +290,122 @@ public static class TestEnvironment
         }
     }
 
-    public static string ElasticPoolName { get; } = Config["ElasticPoolName"];
+    public static bool SupportsJsonPathExpressions
+    {
+        get
+        {
+            if (!IsConfigured)
+            {
+                return false;
+            }
+
+            if (_supportsJsonPathExpressions.HasValue)
+            {
+                return _supportsJsonPathExpressions.Value;
+            }
+
+            try
+            {
+                _supportsJsonPathExpressions = GetProductMajorVersion() >= 14 || IsSqlAzure;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                _supportsJsonPathExpressions = false;
+            }
+
+            return _supportsJsonPathExpressions.Value;
+        }
+    }
+
+    public static bool IsFunctions2017Supported
+    {
+        get
+        {
+            if (!IsConfigured)
+            {
+                return false;
+            }
+
+            if (_supportsFunctions2017.HasValue)
+            {
+                return _supportsFunctions2017.Value;
+            }
+
+            try
+            {
+                _supportsFunctions2017 = GetProductMajorVersion() >= 14 || IsSqlAzure;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                _supportsFunctions2017 = false;
+            }
+
+            return _supportsFunctions2017.Value;
+        }
+    }
+
+    public static bool IsFunctions2019Supported
+    {
+        get
+        {
+            if (!IsConfigured)
+            {
+                return false;
+            }
+
+            if (_supportsFunctions2019.HasValue)
+            {
+                return _supportsFunctions2019.Value;
+            }
+
+            try
+            {
+                _supportsFunctions2019 = GetProductMajorVersion() >= 15 || IsSqlAzure;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                _supportsFunctions2019 = false;
+            }
+
+            return _supportsFunctions2019.Value;
+        }
+    }
+
+    public static bool IsFunctions2022Supported
+    {
+        get
+        {
+            if (!IsConfigured)
+            {
+                return false;
+            }
+
+            if (_supportsFunctions2022.HasValue)
+            {
+                return _supportsFunctions2022.Value;
+            }
+
+            try
+            {
+                _supportsFunctions2022 = GetProductMajorVersion() >= 16 || IsSqlAzure;
+            }
+            catch (PlatformNotSupportedException)
+            {
+                _supportsFunctions2022 = false;
+            }
+
+            return _supportsFunctions2022.Value;
+        }
+    }
+
+    // TODO:SQLJSON Issue #34414
+    public static bool IsJsonTypeSupported
+        => false;
+
+    public static byte SqlServerMajorVersion
+        => GetProductMajorVersion();
+
+    public static string? ElasticPoolName { get; } = Config["ElasticPoolName"];
 
     public static bool? GetFlag(string key)
         => bool.TryParse(Config[key], out var flag) ? flag : null;

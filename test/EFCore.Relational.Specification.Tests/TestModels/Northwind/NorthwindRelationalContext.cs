@@ -3,13 +3,10 @@
 
 namespace Microsoft.EntityFrameworkCore.TestModels.Northwind;
 
-public class NorthwindRelationalContext : NorthwindContext
-{
-    public NorthwindRelationalContext(DbContextOptions options)
-        : base(options)
-    {
-    }
+#nullable disable
 
+public abstract class NorthwindRelationalContext(DbContextOptions options) : NorthwindContext(options)
+{
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

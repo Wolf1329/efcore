@@ -6,15 +6,12 @@ using System.Globalization;
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore;
 
-public abstract class CompositeKeyEndToEndTestBase<TFixture> : IClassFixture<TFixture>
+#nullable disable
+
+public abstract class CompositeKeyEndToEndTestBase<TFixture>(TFixture fixture) : IClassFixture<TFixture>
     where TFixture : CompositeKeyEndToEndTestBase<TFixture>.CompositeKeyEndToEndFixtureBase
 {
-    protected CompositeKeyEndToEndTestBase(TFixture fixture)
-    {
-        Fixture = fixture;
-    }
-
-    private TFixture Fixture { get; }
+    private TFixture Fixture { get; } = fixture;
 
     [ConditionalFact]
     public virtual async Task Can_use_two_non_generated_integers_as_composite_key_end_to_end()
@@ -23,7 +20,7 @@ public abstract class CompositeKeyEndToEndTestBase<TFixture> : IClassFixture<TFi
 
         using (var context = CreateContext())
         {
-            var pegasus = context.Add(
+            var pegasus = await context.AddAsync(
                 new Pegasus
                 {
                     Id1 = ticks,
@@ -74,8 +71,8 @@ public abstract class CompositeKeyEndToEndTestBase<TFixture> : IClassFixture<TFi
         {
             context.Database.EnsureCreatedResiliently();
 
-            var added = context.Add(
-                new Unicorn { Id2 = id2, Name = "Rarity" }).Entity;
+            var added = (await context.AddAsync(
+                new Unicorn { Id2 = id2, Name = "Rarity" })).Entity;
 
             await context.SaveChangesAsync();
 
@@ -124,27 +121,27 @@ public abstract class CompositeKeyEndToEndTestBase<TFixture> : IClassFixture<TFi
 
         using (var context = CreateContext())
         {
-            var pony1 = context.Add(
+            var pony1 = (await context.AddAsync(
                 new EarthPony
                 {
                     Id1 = 1,
                     Id2 = 7,
                     Name = "Apple Jack 1"
-                }).Entity;
-            var pony2 = context.Add(
+                })).Entity;
+            var pony2 = (await context.AddAsync(
                 new EarthPony
                 {
                     Id1 = 2,
                     Id2 = 7,
                     Name = "Apple Jack 2"
-                }).Entity;
-            var pony3 = context.Add(
+                })).Entity;
+            var pony3 = (await context.AddAsync(
                 new EarthPony
                 {
                     Id1 = 3,
                     Id2 = 7,
                     Name = "Apple Jack 3"
-                }).Entity;
+                })).Entity;
 
             await context.SaveChangesAsync();
 
@@ -192,18 +189,14 @@ public abstract class CompositeKeyEndToEndTestBase<TFixture> : IClassFixture<TFi
 
     public abstract class CompositeKeyEndToEndFixtureBase : SharedStoreFixtureBase<DbContext>
     {
-        protected override string StoreName { get; } = "CompositeKeyEndToEndTest";
+        protected override string StoreName
+            => "CompositeKeyEndToEndTest";
 
         protected override Type ContextType { get; } = typeof(BronieContext);
     }
 
-    protected class BronieContext : PoolableDbContext
+    protected class BronieContext(DbContextOptions options) : PoolableDbContext(options)
     {
-        public BronieContext(DbContextOptions options)
-            : base(options)
-        {
-        }
-
         // ReSharper disable UnusedAutoPropertyAccessor.Local
         public DbSet<Pegasus> Pegasuses { get; set; }
         public DbSet<Unicorn> Unicorns { get; set; }

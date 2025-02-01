@@ -9,14 +9,18 @@ updates:
     schedule:
       interval: weekly
     allow:
+      - dependency-name: Azure.Identity
       - dependency-name: Castle.Core
+      - dependency-name: Grpc.AspNetCore
       - dependency-name: Humanizer.Core
       - dependency-name: IdentityServer4.EntityFramework
+      - dependency-name: Microsoft.AspNetCore.Identity.EntityFrameworkCore
       - dependency-name: Microsoft.AspNetCore.OData
       - dependency-name: Microsoft.Azure.Cosmos
       - dependency-name: Microsoft.CSharp
       - dependency-name: Microsoft.Data.SqlClient
       - dependency-name: Microsoft.DotNet.PlatformAbstractions
+      - dependency-name: Microsoft.SqlServer.Types
       - dependency-name: mod_spatialite
       - dependency-name: Mono.TextTemplating
       - dependency-name: NetTopologySuite*
@@ -27,7 +31,6 @@ updates:
       - dependency-name: Microsoft.CodeAnalysis.CSharp*
       # New analyzer rules would need to be disabled
       - dependency-name: DotNetAnalyzers.DocumentationAnalyzers
-      - dependency-name: Microsoft.CodeAnalysis.FxCopAnalyzers
       - dependency-name: StyleCop.Analyzers
       # Testing infrastructure should be intentionally updated
       - dependency-name: BenchmarkDotNet

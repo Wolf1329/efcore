@@ -12,13 +12,12 @@ public class ComplexNavigationsODataQueryTestFixture : ComplexNavigationsQuerySq
 {
     private IHost _selfHostServer;
 
-    protected override string StoreName { get; } = "ODataComplexNavigations";
+    protected override string StoreName
+        => "ODataComplexNavigations";
 
     public ComplexNavigationsODataQueryTestFixture()
-    {
-        (BaseAddress, ClientFactory, _selfHostServer)
+        => (BaseAddress, ClientFactory, _selfHostServer)
             = ODataQueryTestFixtureInitializer.Initialize<ComplexNavigationsODataContext>(StoreName, GetEdmModel());
-    }
 
     private static IEdmModel GetEdmModel()
     {

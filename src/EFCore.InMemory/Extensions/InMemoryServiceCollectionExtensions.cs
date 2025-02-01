@@ -48,11 +48,13 @@ public static class InMemoryServiceCollectionExtensions
             .TryAdd<ITypeMappingSource, InMemoryTypeMappingSource>()
             .TryAdd<IShapedQueryCompilingExpressionVisitorFactory, InMemoryShapedQueryCompilingExpressionVisitorFactory>()
             .TryAdd<IQueryableMethodTranslatingExpressionVisitorFactory, InMemoryQueryableMethodTranslatingExpressionVisitorFactory>()
+            .TryAdd<IQueryTranslationPreprocessorFactory, InMemoryQueryTranslationPreprocessorFactory>()
             .TryAdd<ISingletonOptions, IInMemorySingletonOptions>(p => p.GetRequiredService<IInMemorySingletonOptions>())
             .TryAddProviderSpecificServices(
                 b => b
                     .TryAddSingleton<IInMemorySingletonOptions, InMemorySingletonOptions>()
-                    .TryAddSingleton<IInMemoryStoreCache, InMemoryStoreCache>()
+                    .TryAddScoped<IInMemoryStoreProvider, InMemoryStoreProvider>()
+                    .TryAddSingleton<IInMemoryDatabaseRootCache, InMemoryDatabaseRootCache>()
                     .TryAddSingleton<IInMemoryTableFactory, InMemoryTableFactory>()
                     .TryAddScoped<IInMemoryDatabase, InMemoryDatabase>());
 

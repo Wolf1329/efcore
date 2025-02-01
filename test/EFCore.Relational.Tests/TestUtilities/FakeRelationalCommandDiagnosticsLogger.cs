@@ -30,6 +30,18 @@ public class FakeRelationalCommandDiagnosticsLogger
         CommandSource commandSource)
         => command;
 
+    public DbCommand CommandInitialized(
+        IRelationalConnection connection,
+        DbCommand command,
+        DbCommandMethod commandMethod,
+        DbContext? context,
+        Guid commandId,
+        Guid connectionId,
+        DateTimeOffset startTime,
+        TimeSpan duration,
+        CommandSource commandSource)
+        => command;
+
     public InterceptionResult<DbDataReader> CommandReaderExecuting(
         IRelationalConnection connection,
         DbCommand command,
@@ -261,10 +273,33 @@ public class FakeRelationalCommandDiagnosticsLogger
         TimeSpan duration)
         => default;
 
+    public InterceptionResult DataReaderClosing(
+        IRelationalConnection connection,
+        DbCommand command,
+        DbDataReader dataReader,
+        Guid commandId,
+        int recordsAffected,
+        int readCount,
+        DateTimeOffset startTime)
+        => default;
+
+    public ValueTask<InterceptionResult> DataReaderClosingAsync(
+        IRelationalConnection connection,
+        DbCommand command,
+        DbDataReader dataReader,
+        Guid commandId,
+        int recordsAffected,
+        int readCount,
+        DateTimeOffset startTime)
+        => default;
+
     public bool ShouldLogCommandCreate(DateTimeOffset now)
         => true;
 
     public bool ShouldLogCommandExecute(DateTimeOffset now)
+        => true;
+
+    public bool ShouldLogDataReaderClose(DateTimeOffset now)
         => true;
 
     public bool ShouldLogDataReaderDispose(DateTimeOffset now)

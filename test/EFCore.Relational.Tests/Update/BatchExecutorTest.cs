@@ -15,8 +15,8 @@ public class BatchExecutorTest
         using var context = new TestContext();
         var connection = SetupConnection(context);
 
-        context.Add(new Foo { Id = "1" });
-        context.Add(new Bar { Id = "1" });
+        await context.AddAsync(new Foo { Id = "1" });
+        await context.AddAsync(new Bar { Id = "1" });
 
         if (async)
         {
@@ -40,7 +40,7 @@ public class BatchExecutorTest
         var transaction = new FakeDbTransaction(connection);
         context.Database.UseTransaction(transaction);
 
-        context.Add(
+        await context.AddAsync(
             new Foo { Id = "1" });
 
         if (async)
@@ -59,7 +59,7 @@ public class BatchExecutorTest
     private static FakeDbConnection SetupConnection(TestContext context)
     {
         var dataReader = new FakeDbDataReader(
-            new[] { "RowsAffected" }, new List<object[]> { new object[] { 1 } });
+            ["RowsAffected"], new List<object[]> { new object[] { 1 } });
 
         var connection = new FakeDbConnection(
             "A=B", new FakeCommandExecutor(
@@ -70,17 +70,12 @@ public class BatchExecutorTest
         return connection;
     }
 
-    private class TestContext : DbContext
+    private class TestContext() : DbContext(FakeRelationalTestHelpers.Instance.CreateOptions(_serviceProvider))
     {
         private static readonly IServiceProvider _serviceProvider
             = FakeRelationalOptionsExtension.AddEntityFrameworkRelationalDatabase(
                     new ServiceCollection())
                 .BuildServiceProvider(validateScopes: true);
-
-        public TestContext()
-            : base(RelationalTestHelpers.Instance.CreateOptions(_serviceProvider))
-        {
-        }
 
         public DbSet<Foo> Foos { get; set; }
         public DbSet<Bar> Bars { get; set; }

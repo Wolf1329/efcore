@@ -1,12 +1,15 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
 // ReSharper disable UnusedAutoPropertyAccessor.Local
+
 #pragma warning disable RCS1102 // Make class static.
+using Microsoft.EntityFrameworkCore.SqlServer.Storage.Internal;
+
 namespace Microsoft.EntityFrameworkCore;
+
+#nullable disable
 
 public class SqlServerConfigPatternsTest
 {
@@ -15,7 +18,7 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_query_with_implicit_services_and_OnConfiguring()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 using var context = new NorthwindContext();
                 Assert.Equal(91, await context.Customers.CountAsync());
@@ -43,7 +46,7 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_query_with_implicit_services_and_explicit_config()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 using var context = new NorthwindContext(
                     new DbContextOptionsBuilder()
@@ -54,13 +57,8 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
         {
-            public NorthwindContext(DbContextOptions options)
-                : base(options)
-            {
-            }
-
             public DbSet<Customer> Customers { get; set; }
 
             protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -73,7 +71,7 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_query_with_explicit_services_and_OnConfiguring()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 using var context = new NorthwindContext(
                     new DbContextOptionsBuilder().UseInternalServiceProvider(
@@ -84,13 +82,8 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
         {
-            public NorthwindContext(DbContextOptions options)
-                : base(options)
-            {
-            }
-
             public DbSet<Customer> Customers { get; set; }
 
             protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -107,7 +100,7 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_query_with_explicit_services_and_explicit_config()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 using var context = new NorthwindContext(
                     new DbContextOptionsBuilder()
@@ -120,13 +113,8 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
         {
-            public NorthwindContext(DbContextOptions options)
-                : base(options)
-            {
-            }
-
             public DbSet<Customer> Customers { get; set; }
 
             protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -137,9 +125,9 @@ public class SqlServerConfigPatternsTest
     public class ExplicitServicesAndNoConfig
     {
         [ConditionalFact]
-        public void Throws_on_attempt_to_use_SQL_Server_without_providing_connection_string()
+        public async Task Throws_on_attempt_to_use_SQL_Server_without_providing_connection_string()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 Assert.Equal(
                     CoreStrings.NoProviderConfigured,
@@ -156,13 +144,8 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
         {
-            public NorthwindContext(DbContextOptions options)
-                : base(options)
-            {
-            }
-
             public DbSet<Customer> Customers { get; set; }
 
             protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -173,9 +156,9 @@ public class SqlServerConfigPatternsTest
     public class NoServicesAndNoConfig
     {
         [ConditionalFact]
-        public void Throws_on_attempt_to_use_context_with_no_store()
+        public async Task Throws_on_attempt_to_use_context_with_no_store()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 Assert.Equal(
                     CoreStrings.NoProviderConfigured,
@@ -203,13 +186,13 @@ public class SqlServerConfigPatternsTest
     public class ImplicitConfigButNoServices
     {
         [ConditionalFact]
-        public void Throws_on_attempt_to_use_store_with_no_store_services()
+        public async Task Throws_on_attempt_to_use_store_with_no_store_services()
         {
             var serviceCollection = new ServiceCollection();
             new EntityFrameworkServicesBuilder(serviceCollection).TryAddCoreServices();
             var serviceProvider = serviceCollection.BuildServiceProvider(validateScopes: true);
 
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 Assert.Equal(
                     CoreStrings.NoProviderConfigured,
@@ -224,13 +207,8 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
         {
-            public NorthwindContext(DbContextOptions options)
-                : base(options)
-            {
-            }
-
             public DbSet<Customer> Customers { get; set; }
 
             protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -254,7 +232,7 @@ public class SqlServerConfigPatternsTest
                 .AddSingleton(p => new DbContextOptionsBuilder().UseInternalServiceProvider(p).Options)
                 .BuildServiceProvider(validateScopes: true);
 
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 await serviceProvider.GetRequiredService<MyController>().TestAsync();
             }
@@ -279,9 +257,7 @@ public class SqlServerConfigPatternsTest
         {
             public NorthwindContext(DbContextOptions options)
                 : base(options)
-            {
-                Assert.NotNull(options);
-            }
+                => Assert.NotNull(options);
 
             public DbSet<Customer> Customers { get; set; }
 
@@ -308,7 +284,7 @@ public class SqlServerConfigPatternsTest
                         .UseSqlServer(SqlServerNorthwindTestStoreFactory.NorthwindConnectionString, b => b.ApplyConfiguration())
                         .Options).BuildServiceProvider(validateScopes: true);
 
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 await serviceProvider.GetRequiredService<MyController>().TestAsync();
             }
@@ -333,9 +309,7 @@ public class SqlServerConfigPatternsTest
         {
             public NorthwindContext(DbContextOptions options)
                 : base(options)
-            {
-                Assert.NotNull(options);
-            }
+                => Assert.NotNull(options);
 
             public DbSet<Customer> Customers { get; set; }
 
@@ -349,7 +323,7 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_pass_context_options_to_constructor_and_use_in_builder()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 using var context = new NorthwindContext(
                     new DbContextOptionsBuilder()
@@ -360,13 +334,8 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
         {
-            public NorthwindContext(DbContextOptions options)
-                : base(options)
-            {
-            }
-
             public DbSet<Customer> Customers { get; set; }
 
             protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -379,21 +348,16 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_pass_connection_string_to_constructor_and_use_in_OnConfiguring()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 using var context = new NorthwindContext(SqlServerNorthwindTestStoreFactory.NorthwindConnectionString);
                 Assert.Equal(91, await context.Customers.CountAsync());
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(string connectionString) : DbContext
         {
-            private readonly string _connectionString;
-
-            public NorthwindContext(string connectionString)
-            {
-                _connectionString = connectionString;
-            }
+            private readonly string _connectionString = connectionString;
 
             public DbSet<Customer> Customers { get; set; }
 
@@ -412,7 +376,7 @@ public class SqlServerConfigPatternsTest
         [ConditionalFact]
         public async Task Can_use_one_context_nested_inside_another_of_the_same_type()
         {
-            using (SqlServerTestStore.GetNorthwindStore())
+            await using (await SqlServerTestStore.GetNorthwindStoreAsync())
             {
                 var serviceProvider = new ServiceCollection()
                     .AddEntityFrameworkSqlServer()
@@ -435,14 +399,9 @@ public class SqlServerConfigPatternsTest
             }
         }
 
-        private class NorthwindContext : DbContext
+        private class NorthwindContext(IServiceProvider serviceProvider) : DbContext
         {
-            private readonly IServiceProvider _serviceProvider;
-
-            public NorthwindContext(IServiceProvider serviceProvider)
-            {
-                _serviceProvider = serviceProvider;
-            }
+            private readonly IServiceProvider _serviceProvider = serviceProvider;
 
             public DbSet<Customer> Customers { get; set; }
 
@@ -453,6 +412,418 @@ public class SqlServerConfigPatternsTest
                 => optionsBuilder
                     .UseInternalServiceProvider(_serviceProvider)
                     .UseSqlServer(SqlServerNorthwindTestStoreFactory.NorthwindConnectionString, b => b.ApplyConfiguration());
+        }
+    }
+
+    public class AzureSqlDatabase
+    {
+        [InlineData(true)]
+        [InlineData(false)]
+        [ConditionalTheory]
+        public void Retry_on_failure_not_enabled_by_default_on_Azure_SQL(bool useAzure)
+        {
+            using var context = new NorthwindContext(useAzure);
+
+            Assert.IsType<SqlServerExecutionStrategy>(context.Database.CreateExecutionStrategy());
+        }
+
+        private class NorthwindContext(bool useAzure) : DbContext
+        {
+            private readonly bool _useAzure = useAzure;
+
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .UseSqlServer(
+                        @"Server=test.database.windows.net:4040;Database=Test;ConnectRetryCount=0",
+                        a =>
+                        {
+                            if (_useAzure)
+                            {
+#pragma warning disable CS0618 // Type or member is obsolete
+                                a.UseAzureSqlDefaults(false);
+#pragma warning restore CS0618 // Type or member is obsolete
+                            }
+                        });
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class NonDefaultAzureSqlDatabase
+    {
+        [InlineData(true)]
+        [InlineData(false)]
+        [ConditionalTheory]
+        public void Retry_on_failure_enabled_if_Azure_SQL_configured(bool useAzure)
+        {
+            using var context = new NorthwindContext(useAzure);
+            if (useAzure)
+            {
+                Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+            else
+            {
+                Assert.IsType<SqlServerExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+        }
+
+        private class NorthwindContext(bool useAzure) : DbContext
+        {
+            private readonly bool _useAzure = useAzure;
+
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            {
+                optionsBuilder
+                    .EnableServiceProviderCaching(false);
+                if (_useAzure)
+                {
+                    optionsBuilder
+                        .UseAzureSql(SqlServerNorthwindTestStoreFactory.NorthwindConnectionString);
+                }
+                else
+                {
+                    optionsBuilder
+                        .UseSqlServer(SqlServerNorthwindTestStoreFactory.NorthwindConnectionString);
+                }
+            }
+        }
+    }
+
+    public class ExplicitExecutionStrategies_SqlServer
+    {
+        [InlineData(true)]
+        [InlineData(false)]
+        [ConditionalTheory]
+        public void Retry_strategy_properly_handled(bool before)
+        {
+            using var context = new NorthwindContext(before);
+            if (before)
+            {
+                Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+            else
+            {
+                Assert.IsType<DummyExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+        }
+
+        private class NorthwindContext(bool before) : DbContext
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .UseSqlServer(
+                        SqlServerNorthwindTestStoreFactory.NorthwindConnectionString,
+                        b =>
+                        {
+                            if (before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+
+                            b.EnableRetryOnFailure();
+                            if (!before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+                        });
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class ExplicitExecutionStrategies_AzureSql
+    {
+        [InlineData(true)]
+        [InlineData(false)]
+        [ConditionalTheory]
+        public void Retry_strategy_properly_handled(bool before)
+        {
+            using var context = new NorthwindContext(before);
+            if (before)
+            {
+                Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+            else
+            {
+                Assert.IsType<DummyExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+        }
+
+        private class NorthwindContext(bool before) : DbContext
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .UseAzureSql(
+                        SqlServerNorthwindTestStoreFactory.NorthwindConnectionString,
+                        b =>
+                        {
+                            if (before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+
+                            b.EnableRetryOnFailure();
+                            if (!before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+                        });
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class ExplicitExecutionStrategies_AzureSynapse
+    {
+        [InlineData(true)]
+        [InlineData(false)]
+        [ConditionalTheory]
+        public void Retry_strategy_properly_handled(bool before)
+        {
+            using var context = new NorthwindContext(before);
+            if (before)
+            {
+                Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+            else
+            {
+                Assert.IsType<DummyExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+        }
+
+        private class NorthwindContext(bool before) : DbContext
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .UseAzureSynapse(
+                        SqlServerNorthwindTestStoreFactory.NorthwindConnectionString,
+                        b =>
+                        {
+                            if (before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+
+                            b.EnableRetryOnFailure();
+                            if (!before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+                        });
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class ExplicitExecutionStrategies_ConfigureSqlEngine_AzureSql
+    {
+        [InlineData(true)]
+        [InlineData(false)]
+        [ConditionalTheory]
+        public void Retry_strategy_properly_handled(bool before)
+        {
+            using var context = new NorthwindContext(before);
+            if (before)
+            {
+                Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+            else
+            {
+                Assert.IsType<DummyExecutionStrategy>(context.Database.CreateExecutionStrategy());
+            }
+        }
+
+        private class NorthwindContext(bool before) : DbContext
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .ConfigureSqlEngine(
+                        b =>
+                        {
+                            if (before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+
+                            b.EnableRetryOnFailure();
+                            if (!before)
+                            {
+                                b.ExecutionStrategy(_ => new DummyExecutionStrategy());
+                            }
+                        })
+                    .UseAzureSql();
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class ConfigureTwoEngines
+    {
+        [Fact]
+        public void Throws_when_two_engines_used()
+        {
+            using var context = new NorthwindContext();
+            Assert.Throws<InvalidOperationException>(() => { _ = context.Model; });
+        }
+
+        private class NorthwindContext : DbContext
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .UseSqlServer()
+                    .UseAzureSql();
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class NoEngineConfigured
+    {
+        [Fact]
+        public void Throws_when_no_engine_configured()
+        {
+            using var context = new NorthwindContext();
+            Assert.Throws<InvalidOperationException>(() => { _ = context.Model; });
+        }
+
+        private class NorthwindContext : DbContext
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+                => optionsBuilder
+                    .EnableServiceProviderCaching(false)
+                    .ConfigureSqlEngine();
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
+        }
+    }
+
+    public class AddConfigureDbContextWithRetry
+    {
+        [Fact]
+        public void Does_not_throw_for_Add_Configure()
+        {
+            using var scope = new ServiceCollection()
+                .AddDbContext<NorthwindContext>(b => b.UseSqlServer())
+                .ConfigureDbContext<NorthwindContext>(b => b.ConfigureSqlEngine(o => o.EnableRetryOnFailure()))
+                .BuildServiceProvider(validateScopes: true)
+                .CreateScope();
+
+            var serviceProvider = scope.ServiceProvider;
+
+            var exception = Record.Exception(serviceProvider.GetRequiredService<NorthwindContext>);
+            Assert.Null(exception);
+        }
+
+        [Fact]
+        public void Proper_execution_strategy()
+        {
+            using var scope = new ServiceCollection()
+                .AddDbContext<NorthwindContext>(b => b.UseSqlServer())
+                .ConfigureDbContext<NorthwindContext>(b => b.ConfigureSqlEngine(o => o.EnableRetryOnFailure()))
+                .BuildServiceProvider(validateScopes: true)
+                .CreateScope();
+
+            var serviceProvider = scope.ServiceProvider;
+
+            var context = serviceProvider.GetRequiredService<NorthwindContext>();
+            Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+        }
+
+        [Fact]
+        public void Fallback_execution_strategy_used()
+        {
+            using var scope = new ServiceCollection()
+                .AddDbContext<NorthwindContext>(b => b.UseSqlServer())
+                .ConfigureDbContext<NorthwindContext>(b => b.ConfigureSqlEngine(o => o.EnableRetryOnFailureByDefault()))
+                .BuildServiceProvider(validateScopes: true)
+                .CreateScope();
+
+            var serviceProvider = scope.ServiceProvider;
+
+            var context = serviceProvider.GetRequiredService<NorthwindContext>();
+            Assert.IsType<SqlServerRetryingExecutionStrategy>(context.Database.CreateExecutionStrategy());
+        }
+
+        [Fact]
+        public void Fallback_execution_strategy_not_used()
+        {
+            using var scope = new ServiceCollection()
+                .AddDbContext<NorthwindContext>(b => b.UseSqlServer())
+                .ConfigureDbContext<NorthwindContext>(b => b.ConfigureSqlEngine())
+                .BuildServiceProvider(validateScopes: true)
+                .CreateScope();
+
+            var serviceProvider = scope.ServiceProvider;
+
+            var context = serviceProvider.GetRequiredService<NorthwindContext>();
+            Assert.IsType<SqlServerExecutionStrategy>(context.Database.CreateExecutionStrategy());
+        }
+
+        [Fact]
+        public void Fallback_execution_strategy_does_not_overwrite_Add_first()
+        {
+            using var scope = new ServiceCollection()
+                .AddDbContext<NorthwindContext>(b => b.UseSqlServer(o => o.ExecutionStrategy(_ => new DummyExecutionStrategy())))
+                .ConfigureDbContext<NorthwindContext>(b => b.ConfigureSqlEngine(o => o.EnableRetryOnFailureByDefault()))
+                .BuildServiceProvider(validateScopes: true)
+                .CreateScope();
+
+            var serviceProvider = scope.ServiceProvider;
+
+            var context = serviceProvider.GetRequiredService<NorthwindContext>();
+            Assert.IsType<DummyExecutionStrategy>(context.Database.CreateExecutionStrategy());
+        }
+
+        [Fact]
+        public void Fallback_execution_strategy_does_not_overwrite_Configure_first()
+        {
+            using var scope = new ServiceCollection()
+                .ConfigureDbContext<NorthwindContext>(b => b.ConfigureSqlEngine(o => o.EnableRetryOnFailureByDefault()))
+                .AddDbContext<NorthwindContext>(b => b.UseSqlServer(o => o.ExecutionStrategy(_ => new DummyExecutionStrategy())))
+                .BuildServiceProvider(validateScopes: true)
+                .CreateScope();
+
+            var serviceProvider = scope.ServiceProvider;
+
+            var context = serviceProvider.GetRequiredService<NorthwindContext>();
+            Assert.IsType<DummyExecutionStrategy>(context.Database.CreateExecutionStrategy());
+        }
+
+        private class NorthwindContext(DbContextOptions options) : DbContext(options)
+        {
+            public DbSet<Customer> Customers { get; set; }
+
+            protected override void OnModelCreating(ModelBuilder modelBuilder)
+                => ConfigureModel(modelBuilder);
         }
     }
 
@@ -475,4 +846,23 @@ public class SqlServerConfigPatternsTest
                 b.HasKey(c => c.CustomerID);
                 b.ToTable("Customers");
             });
+
+    private class DummyExecutionStrategy : IExecutionStrategy
+    {
+        public bool RetriesOnFailure
+            => true;
+
+        public TResult Execute<TState, TResult>(
+            TState state,
+            Func<DbContext, TState, TResult> operation,
+            Func<DbContext, TState, ExecutionResult<TResult>> verifySucceeded)
+            => throw new NotImplementedException();
+
+        public Task<TResult> ExecuteAsync<TState, TResult>(
+            TState state,
+            Func<DbContext, TState, CancellationToken, Task<TResult>> operation,
+            Func<DbContext, TState, CancellationToken, Task<ExecutionResult<TResult>>> verifySucceeded,
+            CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+    }
 }

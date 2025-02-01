@@ -1,12 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore;
 
-public class SequentialGuidEndToEndTest : IDisposable
+#nullable disable
+
+public class SequentialGuidEndToEndTest : IAsyncLifetime
 {
     [ConditionalFact]
     public async Task Can_use_sequential_GUID_end_to_end_async()
@@ -21,7 +22,7 @@ public class SequentialGuidEndToEndTest : IDisposable
 
             for (var i = 0; i < 50; i++)
             {
-                context.Add(
+                await context.AddAsync(
                     new Pegasus { Name = "Rainbow Dash " + i });
             }
 
@@ -55,13 +56,13 @@ public class SequentialGuidEndToEndTest : IDisposable
             for (var i = 0; i < 50; i++)
             {
                 guids.Add(
-                    context.Add(
+                    (await context.AddAsync(
                         new Pegasus
                         {
                             Name = "Rainbow Dash " + i,
                             Index = i,
                             Id = Guid.NewGuid()
-                        }).Entity.Id);
+                        })).Entity.Id);
             }
 
             await context.SaveChangesAsync();
@@ -79,17 +80,12 @@ public class SequentialGuidEndToEndTest : IDisposable
         }
     }
 
-    private class BronieContext : DbContext
+    private class BronieContext(IServiceProvider serviceProvider, string databaseName) : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
-        private readonly string _databaseName;
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
+        private readonly string _databaseName = databaseName;
 
-        public BronieContext(IServiceProvider serviceProvider, string databaseName)
-        {
-            _serviceProvider = serviceProvider;
-            _databaseName = databaseName;
-        }
-
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<Pegasus> Pegasuses { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -105,13 +101,11 @@ public class SequentialGuidEndToEndTest : IDisposable
         public int Index { get; set; }
     }
 
-    public SequentialGuidEndToEndTest()
-    {
-        TestStore = SqlServerTestStore.CreateInitialized("SequentialGuidEndToEndTest");
-    }
+    protected SqlServerTestStore TestStore { get; private set; }
 
-    protected SqlServerTestStore TestStore { get; }
+    public async Task InitializeAsync()
+        => TestStore = await SqlServerTestStore.CreateInitializedAsync("SequentialGuidEndToEndTest");
 
-    public virtual void Dispose()
-        => TestStore.Dispose();
+    public async Task DisposeAsync()
+        => await TestStore.DisposeAsync();
 }

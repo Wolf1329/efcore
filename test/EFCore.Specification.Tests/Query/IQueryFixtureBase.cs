@@ -12,18 +12,15 @@ public interface IQueryFixtureBase
 
     ISetSource GetExpectedData();
 
-    IReadOnlyDictionary<Type, object> GetEntitySorters();
+    IReadOnlyDictionary<Type, object> EntitySorters { get; }
 
-    IReadOnlyDictionary<Type, object> GetEntityAsserters();
+    IReadOnlyDictionary<Type, object> EntityAsserters { get; }
 
-    private class DefaultSetSource : ISetSource
+    ListLoggerFactory ListLoggerFactory { get; }
+
+    private class DefaultSetSource(DbContext context) : ISetSource
     {
-        private readonly DbContext _context;
-
-        public DefaultSetSource(DbContext context)
-        {
-            _context = context;
-        }
+        private readonly DbContext _context = context;
 
         public IQueryable<TEntity> Set<TEntity>()
             where TEntity : class

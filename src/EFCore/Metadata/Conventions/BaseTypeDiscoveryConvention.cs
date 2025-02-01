@@ -21,9 +21,7 @@ public class BaseTypeDiscoveryConvention :
     /// </summary>
     /// <param name="dependencies">Parameter object containing dependencies for this convention.</param>
     public BaseTypeDiscoveryConvention(ProviderConventionSetBuilderDependencies dependencies)
-    {
-        Dependencies = dependencies;
-    }
+        => Dependencies = dependencies;
 
     /// <summary>
     ///     Dependencies for this service.
@@ -123,7 +121,8 @@ public class BaseTypeDiscoveryConvention :
         IConventionForeignKey foreignKey,
         IConventionContext<IConventionForeignKey> context)
     {
-        if (foreignKey.IsOwnership
+        if (entityTypeBuilder.Metadata.IsInModel
+            && foreignKey.IsOwnership
             && !entityTypeBuilder.Metadata.IsOwned())
         {
             ProcessEntityType(entityTypeBuilder);

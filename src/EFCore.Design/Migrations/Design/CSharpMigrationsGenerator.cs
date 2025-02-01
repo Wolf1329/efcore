@@ -1,8 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using Microsoft.EntityFrameworkCore.Design.Internal;
-
 namespace Microsoft.EntityFrameworkCore.Migrations.Design;
 
 /// <summary>
@@ -23,9 +21,7 @@ public class CSharpMigrationsGenerator : MigrationsCodeGenerator
         MigrationsCodeGeneratorDependencies dependencies,
         CSharpMigrationsGeneratorDependencies csharpDependencies)
         : base(dependencies)
-    {
-        CSharpDependencies = csharpDependencies;
-    }
+        => CSharpDependencies = csharpDependencies;
 
     /// <summary>
     ///     Dependencies for this service.

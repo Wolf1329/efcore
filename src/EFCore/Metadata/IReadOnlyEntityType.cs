@@ -21,13 +21,6 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     IReadOnlyEntityType? BaseType { get; }
 
     /// <summary>
-    ///     Gets the change tracking strategy being used for this entity type. This strategy indicates how the
-    ///     context detects changes to properties for an instance of the entity type.
-    /// </summary>
-    /// <returns>The change tracking strategy.</returns>
-    ChangeTrackingStrategy GetChangeTrackingStrategy();
-
-    /// <summary>
     ///     Gets the data stored in the model for the given entity type.
     /// </summary>
     /// <param name="providerValues">
@@ -70,10 +63,25 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     /// </summary>
     /// <returns>The discriminator value for this entity type.</returns>
     object? GetDiscriminatorValue()
-        => this[CoreAnnotationNames.DiscriminatorValue];
+    {
+        var annotation = FindAnnotation(CoreAnnotationNames.DiscriminatorValue);
+        return annotation != null
+            ? annotation.Value
+            : !ClrType.IsInstantiable()
+            || (BaseType == null && GetDirectlyDerivedTypes().Count() == 0)
+                ? null
+                : (object?)GetDefaultDiscriminatorValue();
+    }
 
     /// <summary>
-    ///     Gets all types in the model from which a given entity type derives, starting with the root.
+    ///     Returns the default discriminator value that would be used for this entity type.
+    /// </summary>
+    /// <returns>The default discriminator value for this entity type.</returns>
+    string GetDefaultDiscriminatorValue()
+        => !HasSharedClrType ? ClrType.ShortDisplayName() : ShortName();
+
+    /// <summary>
+    ///     Gets all types in the model from which this entity type derives, starting with the root.
     /// </summary>
     /// <returns>
     ///     The base types.
@@ -82,7 +90,7 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
         => GetAllBaseTypesAscending().Reverse();
 
     /// <summary>
-    ///     Gets all types in the model from which a given entity type derives, starting with the closest one.
+    ///     Gets all types in the model from which this entity type derives, starting with the closest one.
     /// </summary>
     /// <returns>
     ///     The base types.
@@ -112,7 +120,7 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     }
 
     /// <summary>
-    ///     Gets all types in the model that derive from a given entity type.
+    ///     Gets all types in the model that derive from this entity type.
     /// </summary>
     /// <returns>The derived types.</returns>
     IEnumerable<IReadOnlyEntityType> GetDerivedTypes();
@@ -125,7 +133,7 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
         => new[] { this }.Concat(GetDerivedTypes());
 
     /// <summary>
-    ///     Gets all types in the model that directly derive from a given entity type.
+    ///     Gets all types in the model that directly derive from this entity type.
     /// </summary>
     /// <returns>The derived types.</returns>
     IEnumerable<IReadOnlyEntityType> GetDirectlyDerivedTypes();
@@ -146,6 +154,17 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     /// </returns>
     IReadOnlyEntityType GetRootType()
         => BaseType?.GetRootType() ?? this;
+
+    /// <summary>
+    ///     Determines if this type derives from (or is the same as) a given type.
+    /// </summary>
+    /// <param name="derivedType">The type to check whether it derives from this type.</param>
+    /// <returns>
+    ///     <see langword="true" /> if <paramref name="derivedType" /> derives from (or is the same as) this type,
+    ///     otherwise <see langword="false" />.
+    /// </returns>
+    bool IReadOnlyTypeBase.IsAssignableFrom(IReadOnlyTypeBase derivedType)
+        => derivedType is IReadOnlyEntityType derivedEntityType && IsAssignableFrom(derivedEntityType);
 
     /// <summary>
     ///     Determines if this entity type derives from (or is the same as) a given entity type.
@@ -182,17 +201,6 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
 
         return false;
     }
-
-    /// <summary>
-    ///     Determines if this entity type derives from (but is not the same as) a given entity type.
-    /// </summary>
-    /// <param name="baseType">The entity type to check if it is a base type of this entity type.</param>
-    /// <returns>
-    ///     <see langword="true" /> if this entity type derives from (but is not the same as) <paramref name="baseType" />,
-    ///     otherwise <see langword="false" />.
-    /// </returns>
-    bool IsStrictlyDerivedFrom(IReadOnlyEntityType baseType)
-        => this != Check.NotNull(baseType, nameof(baseType)) && baseType.IsAssignableFrom(this);
 
     /// <summary>
     ///     Returns the closest entity type that is a parent of both given entity types. If one of the given entities is
@@ -254,7 +262,7 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     /// <param name="property">The property that the key is defined on.</param>
     /// <returns>The key, or null if none is defined.</returns>
     IReadOnlyKey? FindKey(IReadOnlyProperty property)
-        => FindKey(new[] { property });
+        => FindKey([property]);
 
     /// <summary>
     ///     Gets the primary and alternate keys for this entity type.
@@ -588,112 +596,6 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     IEnumerable<IReadOnlyIndex> GetIndexes();
 
     /// <summary>
-    ///     Gets the property with a given name. Returns <see langword="null" /> if no property with the given name is defined.
-    /// </summary>
-    /// <remarks>
-    ///     This API only finds scalar properties and does not find navigation properties. Use
-    ///     <see cref="FindNavigation(string)" /> to find a navigation property.
-    /// </remarks>
-    /// <param name="name">The name of the property.</param>
-    /// <returns>The property, or <see langword="null" /> if none is found.</returns>
-    IReadOnlyProperty? FindProperty(string name);
-
-    /// <summary>
-    ///     Gets a property with the given member info. Returns <see langword="null" /> if no property is found.
-    /// </summary>
-    /// <remarks>
-    ///     This API only finds scalar properties and does not find navigation properties. Use
-    ///     <see cref="FindNavigation(MemberInfo)" /> to find a navigation property.
-    /// </remarks>
-    /// <param name="memberInfo">The member on the entity class.</param>
-    /// <returns>The property, or <see langword="null" /> if none is found.</returns>
-    IReadOnlyProperty? FindProperty(MemberInfo memberInfo)
-        => (Check.NotNull(memberInfo, nameof(memberInfo)) as PropertyInfo)?.IsIndexerProperty() == true
-            ? null
-            : FindProperty(memberInfo.GetSimpleMemberName());
-
-    /// <summary>
-    ///     Finds matching properties on the given entity type. Returns <see langword="null" /> if any property is not found.
-    /// </summary>
-    /// <remarks>
-    ///     This API only finds scalar properties and does not find navigation properties.
-    /// </remarks>
-    /// <param name="propertyNames">The property names.</param>
-    /// <returns>The properties, or <see langword="null" /> if any property is not found.</returns>
-    IReadOnlyList<IReadOnlyProperty>? FindProperties(IReadOnlyList<string> propertyNames);
-
-    /// <summary>
-    ///     Finds a property declared on the type with the given name.
-    ///     Does not return properties defined on a base type.
-    /// </summary>
-    /// <param name="name">The property name.</param>
-    /// <returns>The property, or <see langword="null" /> if none is found.</returns>
-    IReadOnlyProperty? FindDeclaredProperty(string name);
-
-    /// <summary>
-    ///     Gets a property with the given name.
-    /// </summary>
-    /// <remarks>
-    ///     This API only finds scalar properties and does not find navigation properties. Use
-    ///     <see cref="FindNavigation(string)" /> to find a navigation property.
-    /// </remarks>
-    /// <param name="name">The property name.</param>
-    /// <returns>The property, or <see langword="null" /> if none is found.</returns>
-    IReadOnlyProperty GetProperty(string name)
-    {
-        Check.NotEmpty(name, nameof(name));
-
-        var property = FindProperty(name);
-        if (property == null)
-        {
-            if (FindNavigation(name) != null
-                || FindSkipNavigation(name) != null)
-            {
-                throw new InvalidOperationException(
-                    CoreStrings.PropertyIsNavigation(
-                        name, DisplayName(),
-                        nameof(EntityEntry.Property), nameof(EntityEntry.Reference), nameof(EntityEntry.Collection)));
-            }
-
-            throw new InvalidOperationException(CoreStrings.PropertyNotFound(name, DisplayName()));
-        }
-
-        return property;
-    }
-
-    /// <summary>
-    ///     Gets all non-navigation properties declared on this entity type.
-    /// </summary>
-    /// <remarks>
-    ///     This method does not return properties declared on base types.
-    ///     It is useful when iterating over all entity types to avoid processing the same property more than once.
-    ///     Use <see cref="GetProperties" /> to also return properties declared on base types.
-    /// </remarks>
-    /// <returns>Declared non-navigation properties.</returns>
-    IEnumerable<IReadOnlyProperty> GetDeclaredProperties();
-
-    /// <summary>
-    ///     Gets all non-navigation properties declared on the types derived from this entity type.
-    /// </summary>
-    /// <remarks>
-    ///     This method does not return properties declared on the given entity type itself.
-    ///     Use <see cref="GetProperties" /> to return properties declared on this
-    ///     and base entity typed types.
-    /// </remarks>
-    /// <returns>Derived non-navigation properties.</returns>
-    IEnumerable<IReadOnlyProperty> GetDerivedProperties();
-
-    /// <summary>
-    ///     Gets the properties defined on this entity type.
-    /// </summary>
-    /// <remarks>
-    ///     This API only returns scalar properties and does not return navigation properties. Use
-    ///     <see cref="GetNavigations()" /> to get navigation properties.
-    /// </remarks>
-    /// <returns>The properties defined on this entity type.</returns>
-    IEnumerable<IReadOnlyProperty> GetProperties();
-
-    /// <summary>
     ///     Gets the service property with a given name.
     ///     Returns <see langword="null" /> if no property with the given name is defined.
     /// </summary>
@@ -727,6 +629,12 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     IEnumerable<IReadOnlyServiceProperty> GetDerivedServiceProperties();
 
     /// <summary>
+    ///     Checks whether or not this entity type has any <see cref="IServiceProperty" /> defined.
+    /// </summary>
+    /// <returns><see langword="true" /> if there are any service properties defined on this entity type or base types.</returns>
+    bool HasServiceProperties();
+
+    /// <summary>
     ///     Gets all the <see cref="IReadOnlyServiceProperty" /> defined on this entity type.
     /// </summary>
     /// <remarks>
@@ -734,6 +642,46 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
     /// </remarks>
     /// <returns>The service properties defined on this entity type.</returns>
     IEnumerable<IReadOnlyServiceProperty> GetServiceProperties();
+
+    /// <summary>
+    ///     Finds a trigger with the given name.
+    /// </summary>
+    /// <param name="name">The trigger name.</param>
+    /// <returns>The trigger or <see langword="null" /> if no trigger with the given name was found.</returns>
+    IReadOnlyTrigger? FindDeclaredTrigger(string name);
+
+    /// <summary>
+    ///     Returns the declared triggers on the entity type.
+    /// </summary>
+    IEnumerable<IReadOnlyTrigger> GetDeclaredTriggers();
+
+    /// <summary>
+    ///     Gets the <see cref="PropertyAccessMode" /> being used for navigations of this entity type.
+    /// </summary>
+    /// <remarks>
+    ///     Note that individual navigations can override this access mode. The value returned here will
+    ///     be used for any navigation for which no override has been specified.
+    /// </remarks>
+    /// <returns>The access mode being used.</returns>
+    PropertyAccessMode GetNavigationAccessMode();
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    [EntityFrameworkInternal]
+    Func<MaterializationContext, object> GetOrCreateMaterializer(IEntityMaterializerSource source);
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    [EntityFrameworkInternal]
+    Func<MaterializationContext, object> GetOrCreateEmptyMaterializer(IEntityMaterializerSource source);
 
     /// <summary>
     ///     <para>
@@ -752,118 +700,135 @@ public interface IReadOnlyEntityType : IReadOnlyTypeBase
         var builder = new StringBuilder();
         var indentString = new string(' ', indent);
 
-        builder
-            .Append(indentString)
-            .Append("EntityType: ")
-            .Append(DisplayName());
-
-        if (BaseType != null)
+        try
         {
-            builder.Append(" Base: ").Append(BaseType.DisplayName());
+            builder
+                .Append(indentString)
+                .Append("EntityType: ")
+                .Append(DisplayName());
+
+            if (BaseType != null)
+            {
+                builder.Append(" Base: ").Append(BaseType.DisplayName());
+            }
+
+            if (HasSharedClrType)
+            {
+                builder.Append(" CLR Type: ").Append(ClrType.ShortDisplayName());
+            }
+
+            if (IsAbstract())
+            {
+                builder.Append(" Abstract");
+            }
+
+            if (FindPrimaryKey() == null)
+            {
+                builder.Append(" Keyless");
+            }
+
+            if (IsOwned())
+            {
+                builder.Append(" Owned");
+            }
+
+            if (this is EntityType
+                && GetChangeTrackingStrategy() != ChangeTrackingStrategy.Snapshot)
+            {
+                builder.Append(" ChangeTrackingStrategy.").Append(GetChangeTrackingStrategy());
+            }
+
+            if ((options & MetadataDebugStringOptions.SingleLine) == 0)
+            {
+                var properties = GetDeclaredProperties().ToList();
+                if (properties.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Properties: ");
+                    foreach (var property in properties)
+                    {
+                        builder.AppendLine().Append(property.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var navigations = GetDeclaredNavigations().ToList();
+                if (navigations.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Navigations: ");
+                    foreach (var navigation in navigations)
+                    {
+                        builder.AppendLine().Append(navigation.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var skipNavigations = GetDeclaredSkipNavigations().ToList();
+                if (skipNavigations.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Skip navigations: ");
+                    foreach (var skipNavigation in skipNavigations)
+                    {
+                        builder.AppendLine().Append(skipNavigation.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var complexProperties = GetDeclaredComplexProperties().ToList();
+                if (complexProperties.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Complex properties: ");
+                    foreach (var complexProperty in complexProperties)
+                    {
+                        builder.AppendLine().Append(complexProperty.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var serviceProperties = GetDeclaredServiceProperties().ToList();
+                if (serviceProperties.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Service properties: ");
+                    foreach (var serviceProperty in serviceProperties)
+                    {
+                        builder.AppendLine().Append(serviceProperty.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var keys = GetDeclaredKeys().ToList();
+                if (keys.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Keys: ");
+                    foreach (var key in keys)
+                    {
+                        builder.AppendLine().Append(key.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var fks = GetDeclaredForeignKeys().ToList();
+                if (fks.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Foreign keys: ");
+                    foreach (var fk in fks)
+                    {
+                        builder.AppendLine().Append(fk.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                var indexes = GetDeclaredIndexes().ToList();
+                if (indexes.Count != 0)
+                {
+                    builder.AppendLine().Append(indentString).Append("  Indexes: ");
+                    foreach (var index in indexes)
+                    {
+                        builder.AppendLine().Append(index.ToDebugString(options, indent + 4));
+                    }
+                }
+
+                if ((options & MetadataDebugStringOptions.IncludeAnnotations) != 0)
+                {
+                    builder.Append(AnnotationsToDebugString(indent: indent + 2));
+                }
+            }
         }
-
-        if (HasSharedClrType)
+        catch (Exception exception)
         {
-            builder.Append(" CLR Type: ").Append(ClrType.ShortDisplayName());
-        }
-
-        if (IsAbstract())
-        {
-            builder.Append(" Abstract");
-        }
-
-        if (FindPrimaryKey() == null)
-        {
-            builder.Append(" Keyless");
-        }
-
-        if (IsOwned())
-        {
-            builder.Append(" Owned");
-        }
-
-        if (this is EntityType
-            && GetChangeTrackingStrategy() != ChangeTrackingStrategy.Snapshot)
-        {
-            builder.Append(" ChangeTrackingStrategy.").Append(GetChangeTrackingStrategy());
-        }
-
-        if ((options & MetadataDebugStringOptions.SingleLine) == 0)
-        {
-            var properties = GetDeclaredProperties().ToList();
-            if (properties.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Properties: ");
-                foreach (var property in properties)
-                {
-                    builder.AppendLine().Append(property.ToDebugString(options, indent + 4));
-                }
-            }
-
-            var navigations = GetDeclaredNavigations().ToList();
-            if (navigations.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Navigations: ");
-                foreach (var navigation in navigations)
-                {
-                    builder.AppendLine().Append(navigation.ToDebugString(options, indent + 4));
-                }
-            }
-
-            var skipNavigations = GetDeclaredSkipNavigations().ToList();
-            if (skipNavigations.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Skip navigations: ");
-                foreach (var skipNavigation in skipNavigations)
-                {
-                    builder.AppendLine().Append(skipNavigation.ToDebugString(options, indent + 4));
-                }
-            }
-
-            var serviceProperties = GetDeclaredServiceProperties().ToList();
-            if (serviceProperties.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Service properties: ");
-                foreach (var serviceProperty in serviceProperties)
-                {
-                    builder.AppendLine().Append(serviceProperty.ToDebugString(options, indent + 4));
-                }
-            }
-
-            var keys = GetDeclaredKeys().ToList();
-            if (keys.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Keys: ");
-                foreach (var key in keys)
-                {
-                    builder.AppendLine().Append(key.ToDebugString(options, indent + 4));
-                }
-            }
-
-            var fks = GetDeclaredForeignKeys().ToList();
-            if (fks.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Foreign keys: ");
-                foreach (var fk in fks)
-                {
-                    builder.AppendLine().Append(fk.ToDebugString(options, indent + 4));
-                }
-            }
-
-            var indexes = GetDeclaredIndexes().ToList();
-            if (indexes.Count != 0)
-            {
-                builder.AppendLine().Append(indentString).Append("  Indexes: ");
-                foreach (var index in indexes)
-                {
-                    builder.AppendLine().Append(index.ToDebugString(options, indent + 4));
-                }
-            }
-
-            if ((options & MetadataDebugStringOptions.IncludeAnnotations) != 0)
-            {
-                builder.Append(AnnotationsToDebugString(indent: indent + 2));
-            }
+            builder.AppendLine().AppendLine(CoreStrings.DebugViewError(exception.Message));
         }
 
         return builder.ToString();

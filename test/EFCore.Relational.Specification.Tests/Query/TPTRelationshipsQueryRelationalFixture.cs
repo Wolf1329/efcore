@@ -5,9 +5,12 @@ using Microsoft.EntityFrameworkCore.TestModels.InheritanceRelationshipsModel;
 
 namespace Microsoft.EntityFrameworkCore.Query;
 
+#nullable disable
+
 public abstract class TPTRelationshipsQueryRelationalFixture : InheritanceRelationshipsQueryRelationalFixture
 {
-    protected override string StoreName { get; } = "TPTRelationships";
+    protected override string StoreName
+        => "TPTRelationships";
 
     protected override void OnModelCreating(ModelBuilder modelBuilder, DbContext context)
     {

@@ -4,6 +4,7 @@
 using System.Data;
 using System.Text;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore.Storage.Json;
 
 namespace Microsoft.EntityFrameworkCore.SqlServer.Storage.Internal;
 
@@ -18,10 +19,38 @@ public class SqlServerStringTypeMapping : StringTypeMapping
     private const int UnicodeMax = 4000;
     private const int AnsiMax = 8000;
 
+    private static readonly CaseInsensitiveValueComparer CaseInsensitiveValueComparer = new();
+
     private readonly bool _isUtf16;
     private readonly SqlDbType? _sqlDbType;
     private readonly int _maxSpecificSize;
     private readonly int _maxSize;
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    public static new SqlServerStringTypeMapping Default { get; } = new();
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    // TODO:SQLJSON Issue #34414
+    public static SqlServerStringTypeMapping JsonTypeDefault { get; } = new("json", sqlDbType: (SqlDbType)35);
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    public static SqlServerStringTypeMapping UnicodeDefault { get; } = new(
+        "nvarchar(max)", unicode: true, storeTypePostfix: StoreTypePostfix.None);
 
     /// <summary>
     ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -35,10 +64,15 @@ public class SqlServerStringTypeMapping : StringTypeMapping
         int? size = null,
         bool fixedLength = false,
         SqlDbType? sqlDbType = null,
-        StoreTypePostfix? storeTypePostfix = null)
+        StoreTypePostfix? storeTypePostfix = null,
+        bool useKeyComparison = false)
         : this(
             new RelationalTypeMappingParameters(
-                new CoreTypeMappingParameters(typeof(string)),
+                new CoreTypeMappingParameters(
+                    typeof(string),
+                    comparer: useKeyComparison ? CaseInsensitiveValueComparer : null,
+                    keyComparer: useKeyComparison ? CaseInsensitiveValueComparer : null,
+                    jsonValueReaderWriter: JsonStringReaderWriter.Instance),
                 storeType ?? GetDefaultStoreName(unicode, fixedLength),
                 storeTypePostfix ?? StoreTypePostfix.Size,
                 GetDbType(unicode, fixedLength),
@@ -76,12 +110,12 @@ public class SqlServerStringTypeMapping : StringTypeMapping
     {
         if (parameters.Unicode)
         {
-            _maxSpecificSize = parameters.Size.HasValue && parameters.Size <= UnicodeMax ? parameters.Size.Value : UnicodeMax;
+            _maxSpecificSize = parameters.Size is > 0 and <= UnicodeMax ? parameters.Size.Value : UnicodeMax;
             _maxSize = UnicodeMax;
         }
         else
         {
-            _maxSpecificSize = parameters.Size.HasValue && parameters.Size <= AnsiMax ? parameters.Size.Value : AnsiMax;
+            _maxSpecificSize = parameters.Size is > 0 and <= AnsiMax ? parameters.Size.Value : AnsiMax;
             _maxSize = AnsiMax;
         }
 
@@ -98,7 +132,7 @@ public class SqlServerStringTypeMapping : StringTypeMapping
     {
         if (parameters.Unicode)
         {
-            parameters = new(
+            parameters = new RelationalTypeMappingParameters(
                 parameters.CoreParameters,
                 parameters.StoreType,
                 parameters.StoreTypePostfix,
@@ -124,10 +158,14 @@ public class SqlServerStringTypeMapping : StringTypeMapping
         var value = parameter.Value;
         var length = (value as string)?.Length;
 
-        if (_sqlDbType.HasValue
+        // TODO:SQLJSON Issue #34414
+        var sqlDbType = _sqlDbType
+            ?? (StoreType == "json" ? (SqlDbType)35 : null);
+
+        if (sqlDbType.HasValue
             && parameter is SqlParameter sqlParameter) // To avoid crashing wrapping providers
         {
-            sqlParameter.SqlDbType = _sqlDbType.Value;
+            sqlParameter.SqlDbType = sqlDbType.Value;
         }
 
         if ((value == null
@@ -152,13 +190,11 @@ public class SqlServerStringTypeMapping : StringTypeMapping
             // 8000 bytes if no size facet specified, if the data will fit so as to avoid query cache
             // fragmentation by setting lots of different Size values otherwise set to the max bounded length
             // if the value will fit, otherwise set to -1 (unbounded) to avoid SQL client size inference.
-            if (length != null
-                && length <= _maxSpecificSize)
+            if (length <= _maxSpecificSize)
             {
                 parameter.Size = _maxSpecificSize;
             }
-            else if (length != null
-                     && length <= _maxSize)
+            else if (length <= _maxSize)
             {
                 parameter.Size = _maxSize;
             }
@@ -187,7 +223,7 @@ public class SqlServerStringTypeMapping : StringTypeMapping
         var lastConcatStartPoint = 0;
         var concatCount = 1;
         var concatStartList = new List<int>();
-        var castApplied = false;
+        var insideConcat = false;
         for (i = 0; i < stringValue.Length; i++)
         {
             var lineFeed = stringValue[i] == '\n';
@@ -282,12 +318,7 @@ public class SqlServerStringTypeMapping : StringTypeMapping
 
         for (var j = concatStartList.Count - 1; j >= 0; j--)
         {
-            if (castApplied && j == 0)
-            {
-                builder.Insert(concatStartList[j], "CAST(");
-            }
-
-            builder.Insert(concatStartList[j], "CONCAT(");
+            builder.Insert(concatStartList[j], "CONCAT(CAST(");
             builder.Append(')');
         }
 
@@ -307,7 +338,7 @@ public class SqlServerStringTypeMapping : StringTypeMapping
         {
             if (builder.Length != 0)
             {
-                if (!castApplied)
+                if (!insideConcat)
                 {
                     builder.Append(" AS ");
                     if (_isUtf16)
@@ -316,7 +347,7 @@ public class SqlServerStringTypeMapping : StringTypeMapping
                     }
 
                     builder.Append("varchar(max))");
-                    castApplied = true;
+                    insideConcat = true;
                 }
 
                 builder.Append(", ");
@@ -331,6 +362,7 @@ public class SqlServerStringTypeMapping : StringTypeMapping
                 {
                     lastConcatStartPoint = builder.Length;
                     concatCount = 1;
+                    insideConcat = false;
                 }
             }
         }

@@ -5,17 +5,14 @@ using Microsoft.EntityFrameworkCore.TestModels.ManyToManyModel;
 
 namespace Microsoft.EntityFrameworkCore.Query;
 
-public abstract class ManyToManyNoTrackingQueryTestBase<TFixture> : ManyToManyQueryTestBase<TFixture>
+#nullable disable
+
+public abstract class ManyToManyNoTrackingQueryTestBase<TFixture>(TFixture fixture) : ManyToManyQueryTestBase<TFixture>(fixture)
     where TFixture : ManyToManyQueryFixtureBase, new()
 {
     private static readonly MethodInfo _asNoTrackingMethodInfo
         = typeof(EntityFrameworkQueryableExtensions)
             .GetTypeInfo().GetDeclaredMethod(nameof(EntityFrameworkQueryableExtensions.AsNoTracking));
-
-    protected ManyToManyNoTrackingQueryTestBase(TFixture fixture)
-        : base(fixture)
-    {
-    }
 
     protected override bool IgnoreEntryCount
         => true;
@@ -59,5 +56,8 @@ public abstract class ManyToManyNoTrackingQueryTestBase<TFixture> : ManyToManyQu
                         new ExpectedInclude<EntityOne>(et => et.ThreeSkipPayloadFullShared, "OneSkipPayloadFullShared"))))).Message);
 
     public override Task Include_skip_navigation_then_include_inverse_works_for_tracking_query(bool async)
+        => Task.CompletedTask;
+
+    public override Task Include_skip_navigation_then_include_inverse_works_for_tracking_query_unidirectional(bool async)
         => Task.CompletedTask;
 }

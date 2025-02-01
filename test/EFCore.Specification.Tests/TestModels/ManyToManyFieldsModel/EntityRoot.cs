@@ -3,10 +3,13 @@
 
 namespace Microsoft.EntityFrameworkCore.TestModels.ManyToManyFieldsModel;
 
+#nullable disable
+
 public class EntityRoot
 {
     public int Id;
     public string Name;
     public ICollection<EntityThree> ThreeSkipShared;
     public ICollection<EntityCompositeKey> CompositeKeySkipShared;
+    public ICollection<EntityBranch> BranchSkipShared;
 }

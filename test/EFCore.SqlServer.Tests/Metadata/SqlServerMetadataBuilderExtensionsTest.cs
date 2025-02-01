@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
-using Microsoft.EntityFrameworkCore.SqlServer.Internal;
 
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore.Metadata;
@@ -38,6 +37,147 @@ public class SqlServerMetadataBuilderExtensionsTest
         Assert.NotNull(builder.HasValueGenerationStrategy(null, fromDataAnnotation: true));
         Assert.Null(builder.Metadata.GetValueGenerationStrategy());
         Assert.Null(builder.Metadata.GetValueGenerationStrategyConfigurationSource());
+    }
+
+    [ConditionalTheory]
+    [InlineData(SqlServerValueGenerationStrategy.Sequence, SqlServerValueGenerationStrategy.IdentityColumn)]
+    [InlineData(SqlServerValueGenerationStrategy.Sequence, SqlServerValueGenerationStrategy.SequenceHiLo)]
+    [InlineData(SqlServerValueGenerationStrategy.IdentityColumn, SqlServerValueGenerationStrategy.Sequence)]
+    [InlineData(SqlServerValueGenerationStrategy.IdentityColumn, SqlServerValueGenerationStrategy.SequenceHiLo)]
+    [InlineData(SqlServerValueGenerationStrategy.SequenceHiLo, SqlServerValueGenerationStrategy.IdentityColumn)]
+    [InlineData(SqlServerValueGenerationStrategy.SequenceHiLo, SqlServerValueGenerationStrategy.Sequence)]
+    public void Can_change_value_generation_strategy(SqlServerValueGenerationStrategy from, SqlServerValueGenerationStrategy to)
+    {
+        var builder = CreateBuilder();
+
+        Assert.Null(builder.Metadata.GetValueGenerationStrategy());
+        Assert.Null(builder.Metadata.GetValueGenerationStrategyConfigurationSource());
+        AssertFacets();
+
+        Assert.NotNull(builder.HasValueGenerationStrategy(from));
+        Assert.Equal(from, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets();
+
+        Assert.NotNull(builder.HasValueGenerationStrategy(to));
+        Assert.Equal(to, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets();
+
+        void AssertFacets()
+        {
+            Assert.Equal(1, builder.Metadata.GetIdentitySeed());
+            Assert.Equal(1, builder.Metadata.GetIdentityIncrement());
+            Assert.Equal("Sequence", builder.Metadata.GetSequenceNameSuffix());
+            Assert.Null(builder.Metadata.GetSequenceSchema());
+            Assert.Equal("EntityFrameworkHiLoSequence", builder.Metadata.GetHiLoSequenceName());
+            Assert.Null(builder.Metadata.GetHiLoSequenceSchema());
+        }
+    }
+
+    [ConditionalTheory]
+    [InlineData(SqlServerValueGenerationStrategy.Sequence)]
+    [InlineData(SqlServerValueGenerationStrategy.SequenceHiLo)]
+    public void Seed_and_increment_are_reset_when_changing_strategy(SqlServerValueGenerationStrategy to)
+    {
+        var builder = CreateBuilder();
+
+        Assert.Null(builder.Metadata.GetValueGenerationStrategy());
+        Assert.Null(builder.Metadata.GetValueGenerationStrategyConfigurationSource());
+        AssertFacets(1, 1);
+
+        builder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.IdentityColumn);
+        Assert.Equal(SqlServerValueGenerationStrategy.IdentityColumn, builder.Metadata.GetValueGenerationStrategy());
+        builder.HasIdentityColumnSeed(77);
+        builder.HasIdentityColumnIncrement(7);
+        AssertFacets(77, 7);
+
+        Assert.NotNull(builder.HasValueGenerationStrategy(to));
+        Assert.Equal(to, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets(1, 1);
+
+        builder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.IdentityColumn);
+        Assert.Equal(SqlServerValueGenerationStrategy.IdentityColumn, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets(1, 1);
+
+        void AssertFacets(long seed, int increment)
+        {
+            Assert.Equal(seed, builder.Metadata.GetIdentitySeed());
+            Assert.Equal(increment, builder.Metadata.GetIdentityIncrement());
+            Assert.Equal("Sequence", builder.Metadata.GetSequenceNameSuffix());
+            Assert.Null(builder.Metadata.GetSequenceSchema());
+            Assert.Equal("EntityFrameworkHiLoSequence", builder.Metadata.GetHiLoSequenceName());
+            Assert.Null(builder.Metadata.GetHiLoSequenceSchema());
+        }
+    }
+
+    [ConditionalTheory]
+    [InlineData(SqlServerValueGenerationStrategy.IdentityColumn)]
+    [InlineData(SqlServerValueGenerationStrategy.SequenceHiLo)]
+    public void Sequence_and_schema_are_reset_when_changing_strategy(SqlServerValueGenerationStrategy to)
+    {
+        var builder = CreateBuilder();
+
+        Assert.Null(builder.Metadata.GetValueGenerationStrategy());
+        Assert.Null(builder.Metadata.GetValueGenerationStrategyConfigurationSource());
+        AssertFacets("Sequence", null);
+
+        builder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.Sequence);
+        Assert.Equal(SqlServerValueGenerationStrategy.Sequence, builder.Metadata.GetValueGenerationStrategy());
+        builder.Metadata.SetSequenceNameSuffix("MySequence");
+        builder.Metadata.SetSequenceSchema("MySchema");
+        AssertFacets("MySequence", "MySchema");
+
+        Assert.NotNull(builder.HasValueGenerationStrategy(to));
+        Assert.Equal(to, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets("Sequence", null);
+
+        builder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.Sequence);
+        Assert.Equal(SqlServerValueGenerationStrategy.Sequence, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets("Sequence", null);
+
+        void AssertFacets(string sequenceSuffix, string schema)
+        {
+            Assert.Equal(1, builder.Metadata.GetIdentitySeed());
+            Assert.Equal(1, builder.Metadata.GetIdentityIncrement());
+            Assert.Equal(sequenceSuffix, builder.Metadata.GetSequenceNameSuffix());
+            Assert.Equal(schema, builder.Metadata.GetSequenceSchema());
+            Assert.Equal("EntityFrameworkHiLoSequence", builder.Metadata.GetHiLoSequenceName());
+            Assert.Null(builder.Metadata.GetHiLoSequenceSchema());
+        }
+    }
+
+    [ConditionalTheory]
+    [InlineData(SqlServerValueGenerationStrategy.IdentityColumn)]
+    [InlineData(SqlServerValueGenerationStrategy.Sequence)]
+    public void HiLo_sequence_and_schema_are_reset_when_changing_strategy(SqlServerValueGenerationStrategy to)
+    {
+        var builder = CreateBuilder();
+
+        Assert.Null(builder.Metadata.GetValueGenerationStrategy());
+        Assert.Null(builder.Metadata.GetValueGenerationStrategyConfigurationSource());
+        AssertFacets("EntityFrameworkHiLoSequence", null);
+
+        builder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.SequenceHiLo);
+        Assert.Equal(SqlServerValueGenerationStrategy.SequenceHiLo, builder.Metadata.GetValueGenerationStrategy());
+        builder.HasHiLoSequence("MyHiLoSequence", "MyHiLoSchema");
+        AssertFacets("MyHiLoSequence", "MyHiLoSchema");
+
+        Assert.NotNull(builder.HasValueGenerationStrategy(to));
+        Assert.Equal(to, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets("EntityFrameworkHiLoSequence", null);
+
+        builder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.SequenceHiLo);
+        Assert.Equal(SqlServerValueGenerationStrategy.SequenceHiLo, builder.Metadata.GetValueGenerationStrategy());
+        AssertFacets("EntityFrameworkHiLoSequence", null);
+
+        void AssertFacets(string sequence, string schema)
+        {
+            Assert.Equal(1, builder.Metadata.GetIdentitySeed());
+            Assert.Equal(1, builder.Metadata.GetIdentityIncrement());
+            Assert.Equal("Sequence", builder.Metadata.GetSequenceNameSuffix());
+            Assert.Null(builder.Metadata.GetSequenceSchema());
+            Assert.Equal(sequence, builder.Metadata.GetHiLoSequenceName());
+            Assert.Equal(schema, builder.Metadata.GetHiLoSequenceSchema());
+        }
     }
 
     [ConditionalFact]
@@ -116,7 +256,7 @@ public class SqlServerMetadataBuilderExtensionsTest
     }
 
     [ConditionalFact]
-    public void Can_access_entity_type()
+    public void Can_change_entity_type_IsMemoryOptimized()
     {
         var typeBuilder = CreateBuilder().Entity(typeof(Splot));
 
@@ -137,6 +277,50 @@ public class SqlServerMetadataBuilderExtensionsTest
         Assert.NotNull(typeBuilder.IsMemoryOptimized(null, fromDataAnnotation: true));
         Assert.False(typeBuilder.Metadata.IsMemoryOptimized());
         Assert.Null(typeBuilder.Metadata.GetIsMemoryOptimizedConfigurationSource());
+    }
+
+    [ConditionalFact]
+    public void Can_change_entity_type_UseSqlOutputClause()
+    {
+        var typeBuilder = CreateBuilder().Entity(typeof(Splot));
+
+        Assert.Null(typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource());
+
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(true));
+        Assert.True(typeBuilder.Metadata.IsSqlOutputClauseUsed());
+        Assert.Equal(ConfigurationSource.Convention, typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource());
+
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(false, fromDataAnnotation: true));
+        Assert.False(typeBuilder.Metadata.IsSqlOutputClauseUsed());
+        Assert.Equal(ConfigurationSource.DataAnnotation, typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource());
+
+        Assert.Null(typeBuilder.UseSqlOutputClause(true));
+        Assert.False(typeBuilder.Metadata.IsSqlOutputClauseUsed());
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(false));
+
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(null, fromDataAnnotation: true));
+        Assert.True(typeBuilder.Metadata.IsSqlOutputClauseUsed());
+        Assert.Null(typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource());
+
+        var fragmentId = StoreObjectIdentifier.Table("Split");
+
+        Assert.Null(typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource(fragmentId));
+
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(true, fragmentId));
+        Assert.True(typeBuilder.Metadata.IsSqlOutputClauseUsed(fragmentId));
+        Assert.Equal(ConfigurationSource.Convention, typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource(fragmentId));
+
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(false, fragmentId, fromDataAnnotation: true));
+        Assert.False(typeBuilder.Metadata.IsSqlOutputClauseUsed(fragmentId));
+        Assert.Equal(ConfigurationSource.DataAnnotation, typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource(fragmentId));
+
+        Assert.Null(typeBuilder.UseSqlOutputClause(true, fragmentId));
+        Assert.False(typeBuilder.Metadata.IsSqlOutputClauseUsed(fragmentId));
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(false, fragmentId));
+
+        Assert.NotNull(typeBuilder.UseSqlOutputClause(null, fragmentId, fromDataAnnotation: true));
+        Assert.True(typeBuilder.Metadata.IsSqlOutputClauseUsed(fragmentId));
+        Assert.Null(typeBuilder.Metadata.GetUseSqlOutputClauseConfigurationSource(fragmentId));
     }
 
     [ConditionalFact]
@@ -162,42 +346,6 @@ public class SqlServerMetadataBuilderExtensionsTest
 
         Assert.Null(propertyBuilder.HasHiLoSequence(null, null, fromDataAnnotation: true));
         Assert.Null(propertyBuilder.Metadata.GetHiLoSequenceNameConfigurationSource());
-    }
-
-    [ConditionalFact]
-    public void Throws_setting_sequence_generation_for_invalid_type()
-    {
-        var propertyBuilder = CreateBuilder()
-            .Entity(typeof(Splot))
-            .Property(typeof(string), "Name");
-
-        Assert.Equal(
-            SqlServerStrings.SequenceBadType("Name", nameof(Splot), "string"),
-            Assert.Throws<ArgumentException>(
-                () => propertyBuilder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.SequenceHiLo)).Message);
-
-        Assert.Equal(
-            SqlServerStrings.SequenceBadType("Name", nameof(Splot), "string"),
-            Assert.Throws<ArgumentException>(
-                () => new PropertyBuilder((IMutableProperty)propertyBuilder.Metadata).UseHiLo()).Message);
-    }
-
-    [ConditionalFact]
-    public void Throws_setting_identity_generation_for_invalid_type_only_with_explicit()
-    {
-        var propertyBuilder = CreateBuilder()
-            .Entity(typeof(Splot))
-            .Property(typeof(string), "Name");
-
-        Assert.Equal(
-            SqlServerStrings.IdentityBadType("Name", nameof(Splot), "string"),
-            Assert.Throws<ArgumentException>(
-                () => propertyBuilder.HasValueGenerationStrategy(SqlServerValueGenerationStrategy.IdentityColumn)).Message);
-
-        Assert.Equal(
-            SqlServerStrings.IdentityBadType("Name", nameof(Splot), "string"),
-            Assert.Throws<ArgumentException>(
-                () => new PropertyBuilder((IMutableProperty)propertyBuilder.Metadata).UseIdentityColumn()).Message);
     }
 
     [ConditionalFact]
@@ -271,7 +419,5 @@ public class SqlServerMetadataBuilderExtensionsTest
         Assert.Equal("Splow", relationshipBuilder.Metadata.GetConstraintName());
     }
 
-    private class Splot
-    {
-    }
+    private class Splot;
 }

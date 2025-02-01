@@ -23,7 +23,7 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
     {
         using var context = new OptimisticContext();
         var token = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
-        var newToken = changeValue ? new byte[] { 1, 2, 3, 4, 0, 6, 7, 8 } : token;
+        var newToken = changeValue ? [1, 2, 3, 4, 0, 6, 7, 8] : token;
 
         var entity = context.Attach(
             new WithRowVersion { Id = 789, Version = token.ToArray() }).Entity;
@@ -79,12 +79,27 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
 
     [ConditionalTheory]
     [InlineData(typeof(SqlServerDateTimeOffsetTypeMapping), typeof(DateTimeOffset))]
-    [InlineData(typeof(SqlServerDateTimeTypeMapping), typeof(DateTime))]
     [InlineData(typeof(SqlServerDoubleTypeMapping), typeof(double))]
     [InlineData(typeof(SqlServerFloatTypeMapping), typeof(float))]
     [InlineData(typeof(SqlServerTimeSpanTypeMapping), typeof(TimeSpan))]
     public override void Create_and_clone_with_converter(Type mappingType, Type type)
         => base.Create_and_clone_with_converter(mappingType, type);
+
+    [ConditionalFact]
+    public void Create_and_clone_SQL_Server_DateTime_mappings_with_converter()
+    {
+        var mapping = (RelationalTypeMapping)Activator.CreateInstance(
+            typeof(SqlServerDateTimeTypeMapping),
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.CreateInstance,
+            null,
+            [FakeTypeMapping.CreateParameters(typeof(SqlServerDateTimeTypeMapping)), SqlDbType.SmallDateTime],
+            null,
+            null);
+
+        var clone = AssertClone(typeof(SqlServerDateTimeTypeMapping), mapping);
+
+        Assert.Equal(SqlDbType.SmallDateTime, ((SqlServerDateTimeTypeMapping)clone).SqlType);
+    }
 
     [ConditionalFact]
     public virtual void Create_and_clone_SQL_Server_sized_mappings_with_converter()
@@ -111,15 +126,15 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
             literalGenerator,
             StoreTypePostfix.None,
             "udtType",
-            new FakeValueConverter(),
-            new FakeValueComparer(),
-            new FakeValueComparer(),
+            CreateConverter(typeof(object)),
+            CreateComparer(typeof(object)),
+            CreateComparer(typeof(object)),
             DbType.VarNumeric,
             false,
             33,
             true);
 
-        var clone = (SqlServerUdtTypeMapping)mapping.Clone("<clone>", 66);
+        var clone = (SqlServerUdtTypeMapping)mapping.WithStoreTypeAndSize("<clone>", 66);
 
         Assert.NotSame(mapping, clone);
         Assert.Same(mapping.GetType(), clone.GetType());
@@ -141,8 +156,8 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
         Assert.True(clone.IsFixedLength);
         Assert.Same(literalGenerator, clone.LiteralGenerator);
 
-        var newConverter = new FakeValueConverter();
-        clone = (SqlServerUdtTypeMapping)mapping.Clone(newConverter);
+        var newConverter = CreateConverter(typeof(object));
+        clone = (SqlServerUdtTypeMapping)mapping.WithComposedConverter(newConverter);
 
         Assert.NotSame(mapping, clone);
         Assert.Same(mapping.GetType(), clone.GetType());
@@ -195,17 +210,39 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
     }
 
     [ConditionalFact]
+    public override void TimeOnly_literal_generated_correctly()
+    {
+        var typeMapping = GetMapping(typeof(TimeOnly));
+
+        Test_GenerateSqlLiteral_helper(typeMapping, new TimeOnly(13, 10, 15), "'13:10:15'");
+        Test_GenerateSqlLiteral_helper(typeMapping, new TimeOnly(13, 10, 15, 120), "'13:10:15.12'");
+        Test_GenerateSqlLiteral_helper(typeMapping, new TimeOnly(13, 10, 15, 120, 20), "'13:10:15.12002'");
+    }
+
+    [ConditionalFact]
+    public override void DateOnly_literal_generated_correctly()
+        => Test_GenerateSqlLiteral_helper(
+            GetMapping(typeof(DateOnly)),
+            new DateOnly(2015, 3, 12),
+            "'2015-03-12'");
+
+    [ConditionalFact]
     public override void Timespan_literal_generated_correctly()
     {
         Test_GenerateSqlLiteral_helper(
             GetMapping(typeof(TimeSpan)),
-            new TimeSpan(7, 14, 30),
-            "'07:14:30'");
+            new TimeSpan(13, 10, 15),
+            "'13:10:15'");
 
         Test_GenerateSqlLiteral_helper(
             GetMapping(typeof(TimeSpan)),
-            new TimeSpan(0, 7, 14, 30, 120),
-            "'07:14:30.12'");
+            new TimeSpan(0, 13, 10, 15, 120),
+            "'13:10:15.12'");
+
+        Test_GenerateSqlLiteral_helper(
+            GetMapping(typeof(TimeSpan)),
+            new TimeSpan(0, 13, 10, 15, 120, 20),
+            "'13:10:15.12002'");
     }
 
     public override void DateTime_literal_generated_correctly()
@@ -348,7 +385,7 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
     [ConditionalFact]
     public virtual void DateOnly_code_literal_generated_correctly()
     {
-        var typeMapping = new DateOnlyTypeMapping("date", DbType.Date);
+        var typeMapping = new DateOnlyTypeMapping("date");
 
         Test_GenerateCodeLiteral_helper(typeMapping, new DateOnly(2020, 3, 5), "new DateOnly(2020, 3, 5)");
     }
@@ -356,7 +393,7 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
     [ConditionalFact]
     public virtual void TimeOnly_code_literal_generated_correctly()
     {
-        var typeMapping = new TimeOnlyTypeMapping("time", DbType.Time);
+        var typeMapping = new TimeOnlyTypeMapping("time");
 
         Test_GenerateCodeLiteral_helper(typeMapping, new TimeOnly(12, 30, 10), "new TimeOnly(12, 30, 10)");
         Test_GenerateCodeLiteral_helper(typeMapping, new TimeOnly(12, 30, 10, 500), "new TimeOnly(12, 30, 10, 500)");
@@ -393,13 +430,8 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
         Assert.Equal(expectedCode, csharpHelper.UnknownLiteral(value));
     }
 
-    private class FakeType : Type
+    private class FakeType(string fullName) : Type
     {
-        public FakeType(string fullName)
-        {
-            FullName = fullName;
-        }
-
         public override object[] GetCustomAttributes(bool inherit)
             => throw new NotImplementedException();
 
@@ -529,7 +561,7 @@ public class SqlServerTypeMappingTest : RelationalTypeMappingTest
         public override object[] GetCustomAttributes(Type attributeType, bool inherit)
             => throw new NotImplementedException();
 
-        public override string FullName { get; }
+        public override string FullName { get; } = fullName;
 
         public override int GetHashCode()
             => FullName.GetHashCode();

@@ -3,15 +3,14 @@
 
 namespace Microsoft.EntityFrameworkCore;
 
-public class ManyToManyTrackingSqlServerTest
-    : ManyToManyTrackingSqlServerTestBase<ManyToManyTrackingSqlServerTest.ManyToManyTrackingSqlServerFixture>
-{
-    public ManyToManyTrackingSqlServerTest(ManyToManyTrackingSqlServerFixture fixture)
-        : base(fixture)
-    {
-    }
+#nullable disable
 
+public class ManyToManyTrackingSqlServerTest(ManyToManyTrackingSqlServerTest.ManyToManyTrackingSqlServerFixture fixture)
+    : ManyToManyTrackingSqlServerTestBase<ManyToManyTrackingSqlServerTest.ManyToManyTrackingSqlServerFixture>(fixture)
+{
     public class ManyToManyTrackingSqlServerFixture : ManyToManyTrackingSqlServerFixtureBase
     {
+        protected override string StoreName
+            => "ManyToManyTrackingSqlServerTest";
     }
 }

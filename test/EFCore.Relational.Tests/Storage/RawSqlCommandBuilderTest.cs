@@ -30,16 +30,16 @@ public class RawSqlCommandBuilderTest
                 new RelationalSqlGenerationHelperDependencies()),
             new ParameterNameGeneratorFactory(
                 new ParameterNameGeneratorDependencies()),
-                new TestRelationalTypeMappingSource(
-                    TestServiceFactory.Instance.Create<TypeMappingSourceDependencies>(),
-                    TestServiceFactory.Instance.Create<RelationalTypeMappingSourceDependencies>()));
+            new TestRelationalTypeMappingSource(
+                TestServiceFactory.Instance.Create<TypeMappingSourceDependencies>(),
+                TestServiceFactory.Instance.Create<RelationalTypeMappingSourceDependencies>()));
 
     [ConditionalFact]
     public virtual void Builds_RelationalCommand_with_empty_parameter_list()
     {
         var builder = CreateBuilder();
 
-        var rawSqlCommand = builder.Build("SQL COMMAND TEXT", Array.Empty<object>());
+        var rawSqlCommand = builder.Build("SQL COMMAND TEXT", []);
 
         Assert.Equal("SQL COMMAND TEXT", rawSqlCommand.RelationalCommand.CommandText);
         Assert.Equal(0, rawSqlCommand.RelationalCommand.Parameters.Count);

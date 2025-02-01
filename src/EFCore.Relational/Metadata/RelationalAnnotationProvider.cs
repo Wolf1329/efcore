@@ -25,9 +25,7 @@ public class RelationalAnnotationProvider : IRelationalAnnotationProvider
     /// </summary>
     /// <param name="dependencies">Parameter object containing dependencies for this service.</param>
     public RelationalAnnotationProvider(RelationalAnnotationProviderDependencies dependencies)
-    {
-        Dependencies = dependencies;
-    }
+        => Dependencies = dependencies;
 
     /// <summary>
     ///     Relational provider-specific dependencies for this service.
@@ -67,7 +65,23 @@ public class RelationalAnnotationProvider : IRelationalAnnotationProvider
         => Enumerable.Empty<IAnnotation>();
 
     /// <inheritdoc />
+    public virtual IEnumerable<IAnnotation> For(IStoreFunctionParameter parameter, bool designTime)
+        => Enumerable.Empty<IAnnotation>();
+
+    /// <inheritdoc />
     public virtual IEnumerable<IAnnotation> For(IFunctionColumn column, bool designTime)
+        => Enumerable.Empty<IAnnotation>();
+
+    /// <inheritdoc />
+    public virtual IEnumerable<IAnnotation> For(IStoreStoredProcedure storedProcedure, bool designTime)
+        => Enumerable.Empty<IAnnotation>();
+
+    /// <inheritdoc />
+    public virtual IEnumerable<IAnnotation> For(IStoreStoredProcedureParameter parameter, bool designTime)
+        => Enumerable.Empty<IAnnotation>();
+
+    /// <inheritdoc />
+    public virtual IEnumerable<IAnnotation> For(IStoreStoredProcedureResultColumn column, bool designTime)
         => Enumerable.Empty<IAnnotation>();
 
     /// <inheritdoc />

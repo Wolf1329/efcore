@@ -3,8 +3,17 @@
 
 namespace Microsoft.EntityFrameworkCore.Query;
 
+#nullable disable
+
 public class TPTInheritanceQuerySqlServerFixture : TPTInheritanceQueryFixture
 {
     protected override ITestStoreFactory TestStoreFactory
         => SqlServerTestStoreFactory.Instance;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder, DbContext context)
+    {
+        modelBuilder.UseKeySequences();
+
+        base.OnModelCreating(modelBuilder, context);
+    }
 }

@@ -6,18 +6,20 @@ using Microsoft.EntityFrameworkCore.TestModels.TransportationModel;
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore;
 
-public abstract class TPTTableSplittingTestBase : TableSplittingTestBase
-{
-    protected TPTTableSplittingTestBase(ITestOutputHelper testOutputHelper)
-        : base(testOutputHelper)
-    {
-    }
+#nullable disable
 
+public abstract class TPTTableSplittingTestBase(ITestOutputHelper testOutputHelper) : TableSplittingTestBase(testOutputHelper)
+{
     public override Task Can_use_optional_dependents_with_shared_concurrency_tokens()
         // TODO: Issue #22060
         => Task.CompletedTask;
 
-    protected override string StoreName { get; } = "TPTTableSplittingTest";
+    // This fails in TPT rather than table sharing. We have coverage for it elsewhere
+    public override Task ExecuteDelete_throws_for_table_sharing(bool async)
+        => Task.CompletedTask;
+
+    protected override string StoreName
+        => "TPTTableSplittingTest";
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

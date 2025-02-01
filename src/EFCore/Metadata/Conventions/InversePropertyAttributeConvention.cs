@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
 namespace Microsoft.EntityFrameworkCore.Metadata.Conventions;
@@ -15,6 +16,11 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Conventions;
 /// </remarks>
 public class InversePropertyAttributeConvention :
     NavigationAttributeConventionBase<InversePropertyAttribute>,
+    IEntityTypeAddedConvention,
+    IEntityTypeRemovedConvention,
+    IEntityTypeBaseTypeChangedConvention,
+    IEntityTypeMemberIgnoredConvention,
+    INavigationAddedConvention,
     IModelFinalizingConvention
 {
     /// <summary>
@@ -71,14 +77,18 @@ public class InversePropertyAttributeConvention :
         var entityType = entityTypeBuilder.Metadata;
         var targetEntityType = targetEntityTypeBuilder.Metadata;
         var targetClrType = targetEntityType.ClrType;
+        var navigationCandidates = Dependencies.MemberClassifier.GetNavigationCandidates(targetEntityType, useAttributes: true);
         var inverseNavigationPropertyInfo = targetEntityType.GetRuntimeProperties().Values
-                .FirstOrDefault(p => string.Equals(p.GetSimpleMemberName(), attribute.Property, StringComparison.Ordinal))
+                .FirstOrDefault(
+                    p => string.Equals(p.GetSimpleMemberName(), attribute.Property, StringComparison.Ordinal)
+                        && navigationCandidates.ContainsKey(p))
             ?? targetEntityType.GetRuntimeProperties().Values
-                .FirstOrDefault(p => string.Equals(p.GetSimpleMemberName(), attribute.Property, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(
+                    p => string.Equals(p.GetSimpleMemberName(), attribute.Property, StringComparison.OrdinalIgnoreCase)
+                        && navigationCandidates.ContainsKey(p));
 
         if (inverseNavigationPropertyInfo == null
-            || !Dependencies.MemberClassifier.GetNavigationCandidates(targetEntityType)[inverseNavigationPropertyInfo]
-                .Type.IsAssignableFrom(entityType.ClrType))
+            || !navigationCandidates[inverseNavigationPropertyInfo].Type.IsAssignableFrom(entityType.ClrType))
         {
             throw new InvalidOperationException(
                 CoreStrings.InvalidNavigationWithInverseProperty(
@@ -620,7 +630,8 @@ public class InversePropertyAttributeConvention :
             {
                 foreach (var (memberInfo, references) in navigationMap.Values)
                 {
-                    if (memberInfo.GetMemberType().IsAssignableFrom(entityType.ClrType)
+                    var memberInfoType = memberInfo.GetMemberType();
+                    if ((memberInfoType.TryGetSequenceType() ?? memberInfoType).IsAssignableFrom(entityType.ClrType)
                         && IsAmbiguousInverse(navigation, entityType, references))
                     {
                         return true;
@@ -683,7 +694,7 @@ public class InversePropertyAttributeConvention :
         List<(MemberInfo, IConventionEntityType)> referencingNavigationsWithAttribute;
         if (!inverseNavigations.TryGetValue(inverseNavigation.Name, out var inverseTuple))
         {
-            referencingNavigationsWithAttribute = new List<(MemberInfo, IConventionEntityType)>();
+            referencingNavigationsWithAttribute = [];
             inverseNavigations[inverseNavigation.Name] = (inverseNavigation, referencingNavigationsWithAttribute);
         }
         else
@@ -818,8 +829,12 @@ public class InversePropertyAttributeConvention :
         Type targetClrType,
         MemberInfo navigationMemberInfo,
         bool shouldCreate = true)
-        => ((InternalEntityTypeBuilder)entityTypeBuilder)
-            .GetTargetEntityTypeBuilder(targetClrType, navigationMemberInfo, shouldCreate ? ConfigurationSource.DataAnnotation : null);
+        => entityTypeBuilder
+            .GetTargetEntityTypeBuilder(
+                targetClrType,
+                navigationMemberInfo,
+                shouldCreate,
+                fromDataAnnotation: true);
 
     private static Dictionary<string, (MemberInfo Navigation, List<(MemberInfo, IConventionEntityType)> References)>?
         GetInverseNavigations(

@@ -4,6 +4,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore.Diagnostics.Internal;
+using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
@@ -207,7 +208,9 @@ public class NavigationAttributeConventionTest
         var navigationBuilder = postEntityTypeBuilder.HasSkipNavigation(
             new MemberIdentity(nameof(Post.Blogs)),
             blogEntityTypeBuilder.Metadata,
+            null,
             new MemberIdentity(nameof(Blog.Posts)),
+            null,
             ConfigurationSource.Convention,
             collections: true,
             onDependent: false);
@@ -967,6 +970,69 @@ public class NavigationAttributeConventionTest
 
     #endregion
 
+    #region DeleteBehaviorAttribute
+
+    [ConditionalFact]
+    public void DeleteBehaviorAttribute_overrides_configuration_from_convention_source()
+    {
+        var dependentEntityTypeBuilder = CreateInternalEntityTypeBuilder<Dependent>();
+        var principalEntityTypeBuilder =
+            dependentEntityTypeBuilder.ModelBuilder.Entity(
+                typeof(Principal), ConfigurationSource.Convention);
+
+        var relationshipBuilder = dependentEntityTypeBuilder.HasRelationship(
+            principalEntityTypeBuilder.Metadata,
+            nameof(Dependent.Principal),
+            nameof(Principal.Dependents),
+            ConfigurationSource.Convention);
+
+        var navigationBuilder = relationshipBuilder.Metadata.DependentToPrincipal.Builder;
+        var foreignKey = navigationBuilder.Metadata.ForeignKey;
+        foreignKey.SetDeleteBehavior(DeleteBehavior.NoAction, ConfigurationSource.Convention);
+
+        RunDeleteBehaviorAttributeConvention(relationshipBuilder, navigationBuilder);
+
+        Assert.Equal(DeleteBehavior.Restrict, foreignKey.DeleteBehavior);
+    }
+
+    [ConditionalFact]
+    public void DeleteBehaviorAttribute_does_not_override_configuration_from_explicit_source()
+    {
+        var dependentEntityTypeBuilder = CreateInternalEntityTypeBuilder<Dependent>();
+        var principalEntityTypeBuilder =
+            dependentEntityTypeBuilder.ModelBuilder.Entity(
+                typeof(Principal), ConfigurationSource.Convention);
+
+        var relationshipBuilder = dependentEntityTypeBuilder.HasRelationship(
+            principalEntityTypeBuilder.Metadata,
+            nameof(Dependent.Principal),
+            nameof(Principal.Dependents),
+            ConfigurationSource.Convention);
+
+        var navigationBuilder = relationshipBuilder.Metadata.DependentToPrincipal.Builder;
+        var foreignKey = navigationBuilder.Metadata.ForeignKey;
+        foreignKey.SetDeleteBehavior(DeleteBehavior.NoAction, ConfigurationSource.Explicit);
+
+        RunDeleteBehaviorAttributeConvention(relationshipBuilder, navigationBuilder);
+
+        Assert.Equal(DeleteBehavior.NoAction, foreignKey.DeleteBehavior);
+    }
+
+    private void RunDeleteBehaviorAttributeConvention(
+        InternalForeignKeyBuilder relationshipBuilder,
+        InternalNavigationBuilder navigationBuilder
+    )
+    {
+        var dependencies = CreateDependencies();
+        var context = new ConventionContext<IConventionNavigationBuilder>(
+            relationshipBuilder.Metadata.DeclaringEntityType.Model.ConventionDispatcher);
+
+        new DeleteBehaviorAttributeConvention(dependencies)
+            .ProcessNavigationAdded(navigationBuilder, context);
+    }
+
+    #endregion
+
     [ConditionalFact]
     public void Navigation_attribute_convention_runs_for_private_property()
     {
@@ -1057,7 +1123,12 @@ public class NavigationAttributeConventionTest
         public ICollection<Blog> Blogs { get; set; }
     }
 
-    private class Principal
+    private interface IPrincipal
+    {
+        MismatchedInverseProperty MismatchedInverseProperty { get; set; }
+    }
+
+    private class Principal : IPrincipal
     {
         public static readonly PropertyInfo DependentIdProperty = typeof(Principal).GetProperty("DependentId");
 
@@ -1076,6 +1147,8 @@ public class NavigationAttributeConventionTest
 
         [InverseProperty("AnotherPrincipal")]
         public MismatchedInverseProperty MismatchedInverseProperty { get; set; }
+
+        MismatchedInverseProperty IPrincipal.MismatchedInverseProperty { get; set; }
     }
 
     private class Dependent
@@ -1093,6 +1166,7 @@ public class NavigationAttributeConventionTest
 
         [ForeignKey("PrincipalFk")]
         [InverseProperty("Dependent")]
+        [DeleteBehavior(DeleteBehavior.Restrict)]
         public Principal Principal { get; set; }
 
         public Principal AnotherPrincipal { get; set; }

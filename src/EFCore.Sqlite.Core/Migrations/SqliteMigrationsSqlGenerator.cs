@@ -323,7 +323,8 @@ public class SqliteMigrationsSqlGenerator : MigrationsSqlGenerator
                     ComputedColumnSql = column.ComputedColumnSql,
                     IsStored = column.IsStored,
                     Comment = column.Comment,
-                    Collation = column.Collation
+                    Collation = column.Collation,
+                    Table = createTableOperation.Name
                 };
                 addColumnOperation.AddAnnotations(column.GetAnnotations());
                 createTableOperation.Columns.Add(addColumnOperation);
@@ -385,8 +386,7 @@ public class SqliteMigrationsSqlGenerator : MigrationsSqlGenerator
                 intoBuilder.Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(column.Name));
 
                 var defaultValue = rebuildContext.AlterColumnsDeferred.TryGetValue(column.Name, out var alterColumnOperation)
-                    && !alterColumnOperation.IsNullable
-                    && alterColumnOperation.OldColumn.IsNullable
+                    && alterColumnOperation is { IsNullable: false, OldColumn.IsNullable: true }
                         ? alterColumnOperation.DefaultValue
                         : null;
                 if (defaultValue != null)

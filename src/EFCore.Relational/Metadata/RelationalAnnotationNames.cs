@@ -78,6 +78,21 @@ public static class RelationalAnnotationNames
     public const string FunctionName = Prefix + "FunctionName";
 
     /// <summary>
+    ///     The name for mapped delete stored procedure annotations.
+    /// </summary>
+    public const string DeleteStoredProcedure = Prefix + "DeleteStoredProcedure";
+
+    /// <summary>
+    ///     The name for mapped insert stored procedure annotations.
+    /// </summary>
+    public const string InsertStoredProcedure = Prefix + "InsertStoredProcedure";
+
+    /// <summary>
+    ///     The name for mapped update stored procedure annotations.
+    /// </summary>
+    public const string UpdateStoredProcedure = Prefix + "UpdateStoredProcedure";
+
+    /// <summary>
     ///     The name for mapped sql query annotations.
     /// </summary>
     public const string SqlQuery = Prefix + "SqlQuery";
@@ -130,11 +145,6 @@ public static class RelationalAnnotationNames
     public const string DbFunctions = Prefix + "DbFunctions";
 
     /// <summary>
-    ///     The name for trigger annotation.
-    /// </summary>
-    public const string Triggers = Prefix + "Triggers";
-
-    /// <summary>
     ///     The name for the annotation containing the maximum length for database identifiers.
     /// </summary>
     public const string MaxIdentifierLength = Prefix + "MaxIdentifierLength";
@@ -175,9 +185,14 @@ public static class RelationalAnnotationNames
     public const string TptMappingStrategy = "TPT";
 
     /// <summary>
-    ///     The name for database model annotation.
+    ///     The name for relational model annotation.
     /// </summary>
     public const string RelationalModel = Prefix + "RelationalModel";
+
+    /// <summary>
+    ///     The name for relational model factory annotation.
+    /// </summary>
+    public const string RelationalModelFactory = Prefix + "RelationalModelFactory";
 
     /// <summary>
     ///     The name for default mappings annotations.
@@ -220,6 +235,46 @@ public static class RelationalAnnotationNames
     public const string FunctionColumnMappings = Prefix + "FunctionColumnMappings";
 
     /// <summary>
+    ///     The name for insert stored procedure mappings annotations.
+    /// </summary>
+    public const string InsertStoredProcedureMappings = Prefix + "InsertStoredProcedureMappings";
+
+    /// <summary>
+    ///     The name for insert stored procedure result column mappings annotations.
+    /// </summary>
+    public const string InsertStoredProcedureResultColumnMappings = Prefix + "InsertStoredProcedureResultColumnMappings";
+
+    /// <summary>
+    ///     The name for insert stored procedure parameter mappings annotations.
+    /// </summary>
+    public const string InsertStoredProcedureParameterMappings = Prefix + "InsertStoredProcedureParameterMappings";
+
+    /// <summary>
+    ///     The name for delete stored procedure mappings annotations.
+    /// </summary>
+    public const string DeleteStoredProcedureMappings = Prefix + "DeleteStoredProcedureMappings";
+
+    /// <summary>
+    ///     The name for delete stored procedure parameter mappings annotations.
+    /// </summary>
+    public const string DeleteStoredProcedureParameterMappings = Prefix + "DeleteStoredProcedureParameterMappings";
+
+    /// <summary>
+    ///     The name for update stored procedure mappings annotations.
+    /// </summary>
+    public const string UpdateStoredProcedureMappings = Prefix + "UpdateStoredProcedureMappings";
+
+    /// <summary>
+    ///     The name for update stored procedure result column mappings annotations.
+    /// </summary>
+    public const string UpdateStoredProcedureResultColumnMappings = Prefix + "UpdateStoredProcedureResultColumnMappings";
+
+    /// <summary>
+    ///     The name for update stored procedure parameter mappings annotations.
+    /// </summary>
+    public const string UpdateStoredProcedureParameterMappings = Prefix + "UpdateStoredProcedureParameterMappings";
+
+    /// <summary>
     ///     The name for sql query mappings annotations.
     /// </summary>
     public const string SqlQueryMappings = Prefix + "SqlQueryMappings";
@@ -245,6 +300,11 @@ public static class RelationalAnnotationNames
     public const string UniqueConstraintMappings = Prefix + "UniqueConstraintMappings";
 
     /// <summary>
+    ///     The name for the annotation that contains entity type mapping fragments.
+    /// </summary>
+    public const string MappingFragments = Prefix + "MappingFragments";
+
+    /// <summary>
     ///     The name for the annotation that contains table-specific facet overrides.
     /// </summary>
     public const string RelationalOverrides = Prefix + "RelationalOverrides";
@@ -253,4 +313,111 @@ public static class RelationalAnnotationNames
     ///     The name for relational model dependencies annotation.
     /// </summary>
     public const string ModelDependencies = Prefix + "ModelDependencies";
+
+    /// <summary>
+    ///     The name for the reader field value getter delegate annotation.
+    /// </summary>
+    public const string FieldValueGetter = Prefix + "FieldValueGetter";
+
+    /// <summary>
+    ///     The name for the annotation specifying container column name to which the object is mapped.
+    /// </summary>
+    public const string ContainerColumnName = Prefix + "ContainerColumnName";
+
+    /// <summary>
+    ///     The column type for the container column to which the object is mapped.
+    /// </summary>
+    public const string ContainerColumnType = Prefix + nameof(ContainerColumnType);
+
+    /// <summary>
+    ///     The name for the annotation specifying container column type mapping.
+    /// </summary>
+    [Obsolete("Container column mappings are now obtained from IColumnBase.StoreTypeMapping")]
+    public const string ContainerColumnTypeMapping = Prefix + "ContainerColumnTypeMapping";
+
+    /// <summary>
+    ///     The JSON property name for the element that the property/navigation maps to.
+    /// </summary>
+    public const string JsonPropertyName = Prefix + "JsonPropertyName";
+
+    /// <summary>
+    ///     The name for store (database) type annotations.
+    /// </summary>
+    public const string StoreType = Prefix + "StoreType";
+
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    public static readonly ISet<string> AllNames = new HashSet<string>
+    {
+        ColumnName,
+        ColumnOrder,
+        ColumnType,
+        DefaultValueSql,
+        ComputedColumnSql,
+        IsStored,
+        DefaultValue,
+        TableName,
+        Schema,
+        ViewName,
+        ViewSchema,
+        FunctionName,
+        DeleteStoredProcedure,
+        InsertStoredProcedure,
+        UpdateStoredProcedure,
+        SqlQuery,
+        Comment,
+        Collation,
+        DefaultSchema,
+        Name,
+#pragma warning disable CS0618 // Type or member is obsolete
+        SequencePrefix,
+#pragma warning restore CS0618 // Type or member is obsolete
+        Sequences,
+        CheckConstraints,
+        Filter,
+        DbFunctions,
+        MaxIdentifierLength,
+        IsFixedLength,
+        ViewDefinitionSql,
+        IsTableExcludedFromMigrations,
+        MappingStrategy,
+        RelationalModel,
+        RelationalModelFactory,
+        DefaultMappings,
+        DefaultColumnMappings,
+        TableMappings,
+        TableColumnMappings,
+        ViewMappings,
+        ViewColumnMappings,
+        FunctionMappings,
+        FunctionColumnMappings,
+        InsertStoredProcedureMappings,
+        InsertStoredProcedureResultColumnMappings,
+        InsertStoredProcedureParameterMappings,
+        DeleteStoredProcedureMappings,
+        DeleteStoredProcedureParameterMappings,
+        UpdateStoredProcedureMappings,
+        UpdateStoredProcedureResultColumnMappings,
+        UpdateStoredProcedureParameterMappings,
+        SqlQueryMappings,
+        SqlQueryColumnMappings,
+        ForeignKeyMappings,
+        TableIndexMappings,
+        UniqueConstraintMappings,
+        MappingFragments,
+        RelationalOverrides,
+        ModelDependencies,
+        FieldValueGetter,
+        ContainerColumnName,
+        ContainerColumnType,
+#pragma warning disable CS0618 // Type or member is obsolete
+        ContainerColumnTypeMapping,
+#pragma warning restore CS0618 // Type or member is obsolete
+        JsonPropertyName,
+        StoreType
+    };
 }

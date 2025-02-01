@@ -3,6 +3,7 @@
 
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions.Internal;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 
@@ -279,6 +280,20 @@ public class PropertyAttributeConventionTest
     }
 
     [ConditionalFact]
+    public void MaxLengthAttribute_overrides_unbounded_configuration_from_convention_source()
+    {
+        var entityTypeBuilder = CreateInternalEntityTypeBuilder<A>();
+
+        var propertyBuilder = entityTypeBuilder.Property(typeof(string), "MaxLengthProperty", ConfigurationSource.Explicit);
+
+        propertyBuilder.HasMaxLength(-1, ConfigurationSource.Convention);
+
+        RunConvention(propertyBuilder);
+
+        Assert.Equal(10, propertyBuilder.Metadata.GetMaxLength());
+    }
+
+    [ConditionalFact]
     public void MaxLengthAttribute_does_not_override_configuration_from_explicit_source()
     {
         var entityTypeBuilder = CreateInternalEntityTypeBuilder<A>();
@@ -471,12 +486,16 @@ public class PropertyAttributeConventionTest
 
     #region TimestampAttribute
 
-    [ConditionalFact]
-    public void TimestampAttribute_overrides_configuration_from_convention_source()
+    [ConditionalTheory]
+    [InlineData("Timestamp")]
+    [InlineData("LongTimestamp")]
+    [InlineData("ULongTimestamp")]
+    public void TimestampAttribute_overrides_configuration_from_convention_source(string propertyName)
     {
         var entityTypeBuilder = CreateInternalEntityTypeBuilder<A>();
 
-        var propertyBuilder = entityTypeBuilder.Property(typeof(byte[]), "Timestamp", ConfigurationSource.Explicit);
+        var propertyBuilder = entityTypeBuilder.Property(
+            typeof(A).GetProperty(propertyName)!.PropertyType, propertyName, ConfigurationSource.Explicit)!;
 
         propertyBuilder.ValueGenerated(ValueGenerated.Never, ConfigurationSource.Convention);
         propertyBuilder.IsConcurrencyToken(false, ConfigurationSource.Convention);
@@ -487,12 +506,16 @@ public class PropertyAttributeConventionTest
         Assert.True(propertyBuilder.Metadata.IsConcurrencyToken);
     }
 
-    [ConditionalFact]
-    public void TimestampAttribute_does_not_override_configuration_from_explicit_source()
+    [ConditionalTheory]
+    [InlineData("Timestamp")]
+    [InlineData("LongTimestamp")]
+    [InlineData("ULongTimestamp")]
+    public void TimestampAttribute_does_not_override_configuration_from_explicit_source(string propertyName)
     {
         var entityTypeBuilder = CreateInternalEntityTypeBuilder<A>();
 
-        var propertyBuilder = entityTypeBuilder.Property(typeof(byte[]), "Timestamp", ConfigurationSource.Explicit);
+        var propertyBuilder = entityTypeBuilder.Property(
+            typeof(A).GetProperty(propertyName)!.PropertyType, propertyName, ConfigurationSource.Explicit)!;
 
         propertyBuilder.ValueGenerated(ValueGenerated.Never, ConfigurationSource.Explicit);
         propertyBuilder.IsConcurrencyToken(false, ConfigurationSource.Explicit);
@@ -691,7 +714,7 @@ public class PropertyAttributeConventionTest
     {
         var dependencies = CreateDependencies();
         var context = new ConventionContext<IConventionPropertyBuilder>(
-            ((Model)propertyBuilder.Metadata.DeclaringEntityType.Model).ConventionDispatcher);
+            ((Model)propertyBuilder.Metadata.DeclaringType.Model).ConventionDispatcher);
 
         new BackingFieldConvention(dependencies)
             .ProcessPropertyAdded(propertyBuilder, context);
@@ -782,6 +805,12 @@ public class PropertyAttributeConventionTest
         [Timestamp]
         public byte[] Timestamp { get; set; }
 
+        [Timestamp]
+        public long LongTimestamp { get; set; }
+
+        [Timestamp]
+        public ulong ULongTimestamp { get; set; }
+
         [Required]
         private int? PrivateProperty { get; set; }
 
@@ -854,7 +883,13 @@ public class PropertyAttributeConventionTest
         public string StringLengthProperty;
 
         [Timestamp]
-        public byte[] Timestamp;
+        public byte[] Timestamp { get; set; }
+
+        [Timestamp]
+        public long LongTimestamp { get; set; }
+
+        [Timestamp]
+        public ulong ULongTimestamp { get; set; }
     }
 
     private class BaseEntity
@@ -870,9 +905,7 @@ public class PropertyAttributeConventionTest
         public int Number { get; set; }
     }
 
-    private class CompositeKeyDerivedEntity : BaseEntity
-    {
-    }
+    private class CompositeKeyDerivedEntity : BaseEntity;
 
     [PrimaryKey(nameof(Name))]
     private class BaseEntity2

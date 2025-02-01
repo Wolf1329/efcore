@@ -3,8 +3,11 @@
 
 namespace Microsoft.EntityFrameworkCore.TestModels.ManyToManyFieldsModel;
 
+#nullable disable
+
 public class EntityBranch : EntityRoot
 {
     public long Number;
     public ICollection<EntityOne> OneSkip;
+    public ICollection<EntityRoot> RootSkipShared;
 }

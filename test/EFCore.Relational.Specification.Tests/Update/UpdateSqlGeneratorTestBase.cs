@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore.Update.Internal;
 // ReSharper disable InconsistentNaming
 namespace Microsoft.EntityFrameworkCore.Update;
 
+#nullable disable
+
 public abstract class UpdateSqlGeneratorTestBase
 {
     [ConditionalFact]
@@ -244,7 +246,7 @@ public abstract class UpdateSqlGeneratorTestBase
         entry.SetEntityState(EntityState.Added);
         var generator = new ParameterNameGenerator();
 
-        var duckType = model.FindEntityType(typeof(Duck));
+        var duckType = entry.EntityType;
         var idProperty = duckType.FindProperty(nameof(Duck.Id));
         var nameProperty = duckType.FindProperty(nameof(Duck.Name));
         var quacksProperty = duckType.FindProperty(nameof(Duck.Quacks));
@@ -275,7 +277,7 @@ public abstract class UpdateSqlGeneratorTestBase
             columnModifications = columnModifications.Where(c => !c.IsWrite).ToArray();
         }
 
-        return CreateModificationCommand("Ducks", Schema, entry, columnModifications, false);
+        return CreateModificationCommand(entry, columnModifications, false);
     }
 
     protected IModificationCommand CreateUpdateCommand(bool isComputed = true, bool concurrencyToken = true)
@@ -286,7 +288,7 @@ public abstract class UpdateSqlGeneratorTestBase
         entry.SetEntityState(EntityState.Modified);
         var generator = new ParameterNameGenerator();
 
-        var duckType = model.FindEntityType(typeof(Duck));
+        var duckType = entry.EntityType;
         var idProperty = duckType.FindProperty(nameof(Duck.Id));
         var nameProperty = duckType.FindProperty(nameof(Duck.Name));
         var quacksProperty = duckType.FindProperty(nameof(Duck.Quacks));
@@ -312,18 +314,17 @@ public abstract class UpdateSqlGeneratorTestBase
                 concurrencyProperty.GetTableColumnMappings().Single().TypeMapping, false, true, false, concurrencyToken, true)
         };
 
-        return CreateModificationCommand("Ducks", Schema, entry, columnModifications, false);
+        return CreateModificationCommand(entry, columnModifications, false);
     }
 
     protected IModificationCommand CreateDeleteCommand(bool concurrencyToken = true)
     {
-        var model = GetDuckModel();
-        var stateManager = TestHelpers.CreateContextServices(model).GetRequiredService<IStateManager>();
+        var stateManager = TestHelpers.CreateContextServices(GetDuckModel()).GetRequiredService<IStateManager>();
         var entry = stateManager.GetOrCreateEntry(new Duck());
         entry.SetEntityState(EntityState.Deleted);
         var generator = new ParameterNameGenerator();
 
-        var duckType = model.FindEntityType(typeof(Duck));
+        var duckType = entry.EntityType;
         var idProperty = duckType.FindProperty(nameof(Duck.Id));
         var concurrencyProperty = duckType.FindProperty(nameof(Duck.ConcurrencyToken));
 
@@ -337,7 +338,7 @@ public abstract class UpdateSqlGeneratorTestBase
                 concurrencyProperty.GetTableColumnMappings().Single().TypeMapping, false, false, false, concurrencyToken, true)
         };
 
-        return CreateModificationCommand("Ducks", Schema, entry, columnModifications, false);
+        return CreateModificationCommand(entry, columnModifications, false);
     }
 
     protected abstract TestHelpers TestHelpers { get; }
@@ -359,14 +360,12 @@ public abstract class UpdateSqlGeneratorTestBase
     }
 
     private IModificationCommand CreateModificationCommand(
-        string name,
-        string schema,
         InternalEntityEntry entry,
         IReadOnlyList<ColumnModificationParameters> columnModifications,
         bool sensitiveLoggingEnabled)
     {
         var modificationCommandParameters = new ModificationCommandParameters(
-            name, schema, sensitiveLoggingEnabled);
+            entry.EntityType.GetTableMappings().Single().Table, sensitiveLoggingEnabled);
         var modificationCommand = CreateMutableModificationCommandFactory().CreateModificationCommand(
             modificationCommandParameters);
 
@@ -374,7 +373,7 @@ public abstract class UpdateSqlGeneratorTestBase
 
         foreach (var columnModification in columnModifications)
         {
-            modificationCommand.AddColumnModification(columnModification);
+            ((INonTrackedModificationCommand)modificationCommand).AddColumnModification(columnModification);
         }
 
         return modificationCommand;

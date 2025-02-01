@@ -1,9 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore;
 
 public class DatabaseInMemoryTest
@@ -35,7 +34,7 @@ public class DatabaseInMemoryTest
 
         using (var context = new DbContext(options))
         {
-            context.Add(customer);
+            await context.AddAsync(customer);
 
             await context.SaveChangesAsync();
 
@@ -131,9 +130,7 @@ public class DatabaseInMemoryTest
         protected override void OnModelCreating(ModelBuilder modelBuilder)
             => modelBuilder.Entity<Artist>().HasKey(a => a.ArtistId);
 
-        public class Artist : ArtistBase<string>
-        {
-        }
+        public class Artist : ArtistBase<string>;
 
         public class ArtistBase<TKey>
         {

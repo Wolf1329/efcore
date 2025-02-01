@@ -18,7 +18,7 @@ public class CompositeKeyEndToEndTest
 
         using (var context = new BronieContext(serviceProvider))
         {
-            context.Add(
+            await context.AddAsync(
                 new Pegasus
                 {
                     Id1 = ticks,
@@ -67,8 +67,8 @@ public class CompositeKeyEndToEndTest
 
         using (var context = new BronieContext(serviceProvider))
         {
-            var added = context.Add(
-                new Unicorn { Id2 = id2, Name = "Rarity" }).Entity;
+            var added = (await context.AddAsync(
+                new Unicorn { Id2 = id2, Name = "Rarity" })).Entity;
 
             Assert.True(added.Id1 > 0);
             Assert.NotEqual(Guid.Empty, added.Id3);
@@ -121,12 +121,12 @@ public class CompositeKeyEndToEndTest
 
         using (var context = new BronieContext(serviceProvider))
         {
-            var pony1 = context.Add(
-                new EarthPony { Id2 = 7, Name = "Apple Jack 1" }).Entity;
-            var pony2 = context.Add(
-                new EarthPony { Id2 = 7, Name = "Apple Jack 2" }).Entity;
-            var pony3 = context.Add(
-                new EarthPony { Id2 = 7, Name = "Apple Jack 3" }).Entity;
+            var pony1 = (await context.AddAsync(
+                new EarthPony { Id2 = 7, Name = "Apple Jack 1" })).Entity;
+            var pony2 = (await context.AddAsync(
+                new EarthPony { Id2 = 7, Name = "Apple Jack 2" })).Entity;
+            var pony3 = (await context.AddAsync(
+                new EarthPony { Id2 = 7, Name = "Apple Jack 3" })).Entity;
 
             await context.SaveChangesAsync();
 
@@ -169,17 +169,17 @@ public class CompositeKeyEndToEndTest
         }
     }
 
-    private class BronieContext : PoolableDbContext
+    private class BronieContext(IServiceProvider serviceProvider) : PoolableDbContext
     {
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceProvider _serviceProvider = serviceProvider;
 
-        public BronieContext(IServiceProvider serviceProvider)
-        {
-            _serviceProvider = serviceProvider;
-        }
-
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<Pegasus> Pegasuses { get; set; }
+
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<Unicorn> Unicorns { get; set; }
+
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public DbSet<EarthPony> EarthPonies { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

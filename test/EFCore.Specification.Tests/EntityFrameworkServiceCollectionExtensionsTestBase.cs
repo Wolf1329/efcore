@@ -1,20 +1,12 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-
-
 // ReSharper disable InconsistentNaming
+
 namespace Microsoft.EntityFrameworkCore;
 
-public abstract class EntityFrameworkServiceCollectionExtensionsTestBase
+public abstract class EntityFrameworkServiceCollectionExtensionsTestBase(TestHelpers testHelpers)
 {
-    private readonly TestHelpers _testHelpers;
-
-    protected EntityFrameworkServiceCollectionExtensionsTestBase(TestHelpers testHelpers)
-    {
-        _testHelpers = testHelpers;
-    }
-
     [ConditionalFact]
     public void Calling_AddEntityFramework_explicitly_does_not_change_services()
     {
@@ -78,5 +70,5 @@ public abstract class EntityFrameworkServiceCollectionExtensionsTestBase
     }
 
     private IServiceCollection AddServices(IServiceCollection serviceCollection)
-        => _testHelpers.AddProviderServices(serviceCollection);
+        => testHelpers.AddProviderServices(serviceCollection);
 }

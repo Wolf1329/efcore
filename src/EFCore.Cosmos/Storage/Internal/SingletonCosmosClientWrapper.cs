@@ -1,7 +1,9 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using Azure.Core;
 using Microsoft.EntityFrameworkCore.Cosmos.Infrastructure.Internal;
+using Microsoft.EntityFrameworkCore.Cosmos.Internal;
 
 namespace Microsoft.EntityFrameworkCore.Cosmos.Storage.Internal;
 
@@ -18,6 +20,7 @@ public class SingletonCosmosClientWrapper : ISingletonCosmosClientWrapper
     private readonly string? _endpoint;
     private readonly string? _key;
     private readonly string? _connectionString;
+    private readonly TokenCredential? _tokenCredential;
     private CosmosClient? _client;
 
     /// <summary>
@@ -31,11 +34,17 @@ public class SingletonCosmosClientWrapper : ISingletonCosmosClientWrapper
         _endpoint = options.AccountEndpoint;
         _key = options.AccountKey;
         _connectionString = options.ConnectionString;
+        _tokenCredential = options.TokenCredential;
         var configuration = new CosmosClientOptions { ApplicationName = UserAgent, Serializer = new JsonCosmosSerializer() };
 
         if (options.Region != null)
         {
             configuration.ApplicationRegion = options.Region;
+        }
+
+        if (options.PreferredRegions != null)
+        {
+            configuration.ApplicationPreferredRegions = options.PreferredRegions;
         }
 
         if (options.LimitToEndpoint != null)
@@ -99,7 +108,11 @@ public class SingletonCosmosClientWrapper : ISingletonCosmosClientWrapper
     /// </summary>
     public virtual CosmosClient Client
         => _client ??= string.IsNullOrEmpty(_connectionString)
-            ? new CosmosClient(_endpoint, _key, _options)
+            ? _tokenCredential == null
+                ? _endpoint == null
+                    ? throw new InvalidOperationException(CosmosStrings.ConnectionInfoMissing)
+                    : new CosmosClient(_endpoint, _key, _options)
+                : new CosmosClient(_endpoint, _tokenCredential, _options)
             : new CosmosClient(_connectionString, _options);
 
     /// <summary>

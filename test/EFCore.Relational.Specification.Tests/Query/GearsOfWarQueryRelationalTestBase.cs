@@ -6,33 +6,20 @@ using Xunit.Sdk;
 
 namespace Microsoft.EntityFrameworkCore.Query;
 
-public abstract class GearsOfWarQueryRelationalTestBase<TFixture> : GearsOfWarQueryTestBase<TFixture>
+#nullable disable
+
+public abstract class GearsOfWarQueryRelationalTestBase<TFixture>(TFixture fixture) : GearsOfWarQueryTestBase<TFixture>(fixture)
     where TFixture : GearsOfWarQueryFixtureBase, new()
 {
-    protected GearsOfWarQueryRelationalTestBase(TFixture fixture)
-        : base(fixture)
-    {
-    }
-
     [ConditionalTheory]
     [MemberData(nameof(IsAsyncData))]
     public virtual Task Parameter_used_multiple_times_take_appropriate_inferred_type_mapping(bool async)
     {
-        var place = "Seattle";
+        var place = "Ephyra's location";
         return AssertQuery(
             async,
-            ss => ss.Set<City>().Where(e => e.Nation == place || e.Location == place));
+            ss => ss.Set<City>().Where(e => e.Nation == place || e.Location == place || e.Location == place));
     }
-
-    public override async Task
-        Correlated_collection_with_groupby_with_complex_grouping_key_not_projecting_identifier_column_with_group_aggregate_in_final_projection(
-            bool async)
-        => Assert.Equal(
-            RelationalStrings.InsufficientInformationToIdentifyElementOfCollectionJoin,
-            (await Assert.ThrowsAsync<InvalidOperationException>(
-                () => base
-                    .Correlated_collection_with_groupby_with_complex_grouping_key_not_projecting_identifier_column_with_group_aggregate_in_final_projection(
-                        async))).Message);
 
     public override async Task Correlated_collection_with_distinct_not_projecting_identifier_column_also_projecting_complex_expressions(
         bool async)
@@ -124,12 +111,14 @@ public abstract class GearsOfWarQueryRelationalTestBase<TFixture> : GearsOfWarQu
     }
 
     public override async Task Projecting_correlated_collection_followed_by_Distinct(bool async)
-        => Assert.Equal(RelationalStrings.DistinctOnCollectionNotSupported,
+        => Assert.Equal(
+            RelationalStrings.DistinctOnCollectionNotSupported,
             (await Assert.ThrowsAsync<InvalidOperationException>(
                 () => base.Projecting_correlated_collection_followed_by_Distinct(async))).Message);
 
     public override async Task Projecting_some_properties_as_well_as_correlated_collection_followed_by_Distinct(bool async)
-        => Assert.Equal(RelationalStrings.DistinctOnCollectionNotSupported,
+        => Assert.Equal(
+            RelationalStrings.DistinctOnCollectionNotSupported,
             (await Assert.ThrowsAsync<InvalidOperationException>(
                 () => base.Projecting_some_properties_as_well_as_correlated_collection_followed_by_Distinct(async))).Message);
 
@@ -146,12 +135,10 @@ public abstract class GearsOfWarQueryRelationalTestBase<TFixture> : GearsOfWarQu
                 () => base.Projecting_entity_as_well_as_complex_correlated_collection_followed_by_Distinct(async))).Message);
 
     public override async Task Projecting_entity_as_well_as_correlated_collection_of_scalars_followed_by_Distinct(bool async)
-    {
-        Assert.Equal(
+        => Assert.Equal(
             RelationalStrings.DistinctOnCollectionNotSupported,
             (await Assert.ThrowsAsync<InvalidOperationException>(
                 () => base.Projecting_entity_as_well_as_correlated_collection_of_scalars_followed_by_Distinct(async))).Message);
-    }
 
     public override async Task Correlated_collection_with_distinct_3_levels(bool async)
         => Assert.Equal(
@@ -175,10 +162,7 @@ public abstract class GearsOfWarQueryRelationalTestBase<TFixture> : GearsOfWarQu
             (await Assert.ThrowsAsync<InvalidOperationException>(
                 () => base.Correlated_collection_after_distinct_3_levels_without_original_identifiers(async))).Message);
 
-    protected virtual bool CanExecuteQueryString
-        => false;
-
     protected override QueryAsserter CreateQueryAsserter(TFixture fixture)
         => new RelationalQueryAsserter(
-            fixture, RewriteExpectedQueryExpression, RewriteServerQueryExpression, canExecuteQueryString: CanExecuteQueryString);
+            fixture, RewriteExpectedQueryExpression, RewriteServerQueryExpression);
 }

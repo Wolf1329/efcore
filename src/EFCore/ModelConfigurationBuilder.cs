@@ -25,20 +25,21 @@ public class ModelConfigurationBuilder
 {
     private readonly ModelConfiguration _modelConfiguration = new();
     private readonly ConventionSet _conventions;
+    private readonly ConventionSetBuilder _conventionSetBuilder;
 
     /// <summary>
-    ///     Initializes a new instance of the <see cref="ModelConfigurationBuilder" />.
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
     /// </summary>
-    /// <remarks>
-    ///     See <see href="https://aka.ms/efcore-docs-pre-convention">Pre-convention model building in EF Core</see> for more information and
-    ///     examples.
-    /// </remarks>
-    /// <param name="conventions">The conventions to be applied during model building.</param>
-    public ModelConfigurationBuilder(ConventionSet conventions)
+    [EntityFrameworkInternal]
+    public ModelConfigurationBuilder(ConventionSet conventions, IServiceProvider serviceProvider)
     {
         Check.NotNull(conventions, nameof(conventions));
 
         _conventions = conventions;
+        _conventionSetBuilder = new ConventionSetBuilder(conventions, serviceProvider);
     }
 
     /// <summary>
@@ -50,6 +51,12 @@ public class ModelConfigurationBuilder
     [EntityFrameworkInternal]
     protected virtual ModelConfiguration ModelConfiguration
         => _modelConfiguration;
+
+    /// <summary>
+    ///     Gets the builder for the conventions that will be used in the model.
+    /// </summary>
+    public virtual ConventionSetBuilder Conventions
+        => _conventionSetBuilder;
 
     /// <summary>
     ///     Prevents the conventions from the given type from discovering properties of the given or derived types.
@@ -192,6 +199,7 @@ public class ModelConfigurationBuilder
     /// <summary>
     ///     Marks the given type as a scalar, even when used outside of entity types. This allows values of this type
     ///     to be used in queries that are not referencing property of this type.
+    ///     Calling this won't affect whether properties of this type are discovered.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -219,6 +227,7 @@ public class ModelConfigurationBuilder
     /// <summary>
     ///     Marks the given type as a scalar, even when used outside of entity types. This allows values of this type
     ///     to be used in queries that are not referencing property of this type.
+    ///     Calling this won't affect whether properties of this type are discovered.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -313,6 +322,51 @@ public class ModelConfigurationBuilder
         buildAction(scalarBuilder);
 
         return this;
+    }
+
+    /// <summary>
+    ///     Marks the given and derived types as corresponding to complex properties.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         This can also be called on an interface to apply the configuration to all properties of implementing types.
+    ///     </para>
+    ///     <para>
+    ///         See <see href="https://aka.ms/efcore-docs-pre-convention">Pre-convention model building in EF Core</see> for more information and
+    ///         examples.
+    ///     </para>
+    /// </remarks>
+    /// <typeparam name="TProperty">The property type to be configured.</typeparam>
+    /// <returns>An object that can be used to configure the properties.</returns>
+    public virtual ComplexPropertiesConfigurationBuilder<TProperty> ComplexProperties<TProperty>()
+    {
+        var property = _modelConfiguration.GetOrAddComplexProperty(typeof(TProperty));
+
+        return new ComplexPropertiesConfigurationBuilder<TProperty>(property);
+    }
+
+    /// <summary>
+    ///     Marks the given and derived types as corresponding to complex properties.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         This can also be called on an interface or an unbound generic type to apply the configuration to all
+    ///         properties of implementing and constructed types.
+    ///     </para>
+    ///     <para>
+    ///         See <see href="https://aka.ms/efcore-docs-pre-convention">Pre-convention model building in EF Core</see> for more information and
+    ///         examples.
+    ///     </para>
+    /// </remarks>
+    /// <param name="propertyType">The property type to be configured.</param>
+    /// <returns>An object that can be used to configure the property.</returns>
+    public virtual ComplexPropertiesConfigurationBuilder ComplexProperties(Type propertyType)
+    {
+        Check.NotNull(propertyType, nameof(propertyType));
+
+        var property = _modelConfiguration.GetOrAddComplexProperty(propertyType);
+
+        return new ComplexPropertiesConfigurationBuilder(property);
     }
 
     /// <summary>

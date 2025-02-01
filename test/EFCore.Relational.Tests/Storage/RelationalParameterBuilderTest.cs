@@ -49,7 +49,7 @@ public class RelationalParameterBuilderTest
             TestServiceFactory.Instance.Create<TypeMappingSourceDependencies>(),
             TestServiceFactory.Instance.Create<RelationalTypeMappingSourceDependencies>());
 
-        var modelBuilder = RelationalTestHelpers.Instance.CreateConventionBuilder();
+        var modelBuilder = FakeRelationalTestHelpers.Instance.CreateConventionBuilder();
 
         modelBuilder.Entity("MyType").Property<string>("MyProp").IsRequired(!nullable);
 
@@ -96,7 +96,7 @@ public class RelationalParameterBuilderTest
                 new TypeMappedRelationalParameter(
                     "FirstInvariant",
                     "FirstName",
-                    new IntTypeMapping("int", DbType.Int32),
+                    new IntTypeMapping("int"),
                     nullable: false),
                 new TypeMappedRelationalParameter(
                     "SecondInvariant",

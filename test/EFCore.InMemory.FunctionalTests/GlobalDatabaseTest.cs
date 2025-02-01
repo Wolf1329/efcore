@@ -144,50 +144,59 @@ public class GlobalDatabaseTest
     }
 
     [ConditionalFact]
-    public void Throws_changing_global_store_in_OnConfiguring_when_UseInternalServiceProvider()
+    public void EnableNullChecks_forces_different_internal_service_provider()
     {
-        using (var context = new ChangeSdlCacheContext(false))
+        using var context1 = new ChangeNullabilityChecksContext(enableNullChecks: true);
+        using var context2 = new ChangeNullabilityChecksContext(enableNullChecks: false);
+        Assert.NotSame(((IInfrastructure<IServiceProvider>)context1).Instance, ((IInfrastructure<IServiceProvider>)context2).Instance);
+    }
+
+    private class ChangeNullabilityChecksContext(bool enableNullChecks) : DbContext
+    {
+        private readonly bool _enableNullChecks = enableNullChecks;
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            => optionsBuilder
+                .UseInMemoryDatabase(
+                    nameof(ChangeNullabilityChecksCacheContext),
+                    b => b.EnableNullChecks(_enableNullChecks));
+    }
+
+    [ConditionalFact]
+    public void Throws_changing_nullability_checks_in_OnConfiguring_when_UseInternalServiceProvider()
+    {
+        using (var context = new ChangeNullabilityChecksCacheContext(false))
         {
             Assert.NotNull(context.Model);
         }
 
-        using (var context = new ChangeSdlCacheContext(true))
+        using (var context = new ChangeNullabilityChecksCacheContext(true))
         {
             Assert.Equal(
                 CoreStrings.SingletonOptionChanged(
-                    nameof(InMemoryDbContextOptionsExtensions.UseInMemoryDatabase),
+                    nameof(InMemoryDbContextOptionsBuilder.EnableNullChecks),
                     nameof(DbContextOptionsBuilder.UseInternalServiceProvider)),
                 Assert.Throws<InvalidOperationException>(() => context.Model).Message);
         }
     }
 
-    private class ChangeSdlCacheContext : DbContext
+    private class ChangeNullabilityChecksCacheContext(bool on) : DbContext
     {
         private static readonly IServiceProvider _serviceProvider
             = new ServiceCollection()
                 .AddEntityFrameworkInMemoryDatabase()
                 .BuildServiceProvider(validateScopes: true);
 
-        private readonly bool _on;
-
-        public ChangeSdlCacheContext(bool on)
-        {
-            _on = on;
-        }
+        private readonly bool _on = on;
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
             => optionsBuilder
                 .UseInternalServiceProvider(_serviceProvider)
-                .UseInMemoryDatabase(nameof(ChangeSdlCacheContext), _on ? _databaseRoot : null);
+                .UseInMemoryDatabase(nameof(ChangeNullabilityChecksCacheContext), b => b.EnableNullChecks(_on));
     }
 
-    private class BooFooContext : DbContext
+    private class BooFooContext(DbContextOptions options) : DbContext(options)
     {
-        public BooFooContext(DbContextOptions options)
-            : base(options)
-        {
-        }
-
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Foo>(

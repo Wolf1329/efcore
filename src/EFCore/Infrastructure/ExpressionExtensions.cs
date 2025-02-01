@@ -29,7 +29,7 @@ public static class ExpressionExtensions
     /// <param name="characterLimit">An optional limit to the number of characters included. Additional output will be truncated.</param>
     /// <returns>The printable representation.</returns>
     public static string Print(this Expression expression, int? characterLimit = null)
-        => new ExpressionPrinter().Print(expression, characterLimit);
+        => new ExpressionPrinter().PrintExpression(expression, characterLimit);
 
     /// <summary>
     ///     Creates a <see cref="MemberExpression"></see> that represents accessing either a field or a property.
@@ -58,26 +58,32 @@ public static class ExpressionExtensions
     /// <param name="memberExpression">The member to which assignment will be made.</param>
     /// <param name="valueExpression">The value that will be assigned.</param>
     /// <returns>The <see cref="BinaryExpression" /> representing the assignment binding.</returns>
+    [UnconditionalSuppressMessage(
+        "ReflectionAnalysis", "IL2077",
+        Justification = "AssignBinaryExpression is preserved via DynamicDependency below")]
+    [DynamicDependency(DynamicallyAccessedMemberTypes.All, "System.Linq.Expressions.AssignBinaryExpression", "System.Linq.Expressions")]
     public static Expression Assign(
         this MemberExpression memberExpression,
         Expression valueExpression)
     {
-        if (memberExpression.Member is FieldInfo fieldInfo
-            && fieldInfo.IsInitOnly)
+        if (memberExpression.Member is FieldInfo { IsInitOnly: true })
         {
             return (BinaryExpression)Activator.CreateInstance(
-                AssignBinaryExpressionType,
+                GetAssignBinaryExpressionType(),
                 BindingFlags.NonPublic | BindingFlags.Instance,
                 null,
-                new object[] { memberExpression, valueExpression },
+                [memberExpression, valueExpression],
                 null)!;
         }
 
         return Expression.Assign(memberExpression, valueExpression);
-    }
 
-    private static readonly Type AssignBinaryExpressionType
-        = typeof(Expression).Assembly.GetType("System.Linq.Expressions.AssignBinaryExpression", throwOnError: true)!;
+        [UnconditionalSuppressMessage(
+            "ReflectionAnalysis", "IL2026",
+            Justification = "DynamicDependency ensures AssignBinaryExpression isn't trimmed")]
+        static Type GetAssignBinaryExpressionType()
+            => typeof(Expression).Assembly.GetType("System.Linq.Expressions.AssignBinaryExpression", throwOnError: true)!;
+    }
 
     /// <summary>
     ///     If the given a method-call expression represents a call to <see cref="EF.Property{TProperty}" />, then this
@@ -282,11 +288,13 @@ public static class ExpressionExtensions
         Type type,
         int index,
         IPropertyBase? property)
-        => Expression.Call(
-            ValueBufferTryReadValueMethod.MakeGenericMethod(type),
-            valueBuffer,
-            Expression.Constant(index),
-            Expression.Constant(property, typeof(IPropertyBase)));
+        => property is INavigationBase
+            ? Expression.Constant(null, typeof(object))
+            : Expression.Call(
+                MakeValueBufferTryReadValueMethod(type),
+                valueBuffer,
+                Expression.Constant(index),
+                Expression.Constant(property, typeof(IPropertyBase)));
 
     /// <summary>
     ///     <para>
@@ -300,6 +308,12 @@ public static class ExpressionExtensions
     /// </summary>
     public static readonly MethodInfo ValueBufferTryReadValueMethod
         = typeof(ExpressionExtensions).GetTypeInfo().GetDeclaredMethod(nameof(ValueBufferTryReadValue))!;
+
+    [UnconditionalSuppressMessage(
+        "ReflectionAnalysis", "IL2060",
+        Justification = "ValueBufferTryReadValueMethod has no DynamicallyAccessedMembers annotations and is safe to construct.")]
+    private static MethodInfo MakeValueBufferTryReadValueMethod(Type type)
+        => ValueBufferTryReadValueMethod.MakeGenericMethod(type);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static TValue ValueBufferTryReadValue<TValue>(
@@ -353,7 +367,14 @@ public static class ExpressionExtensions
         bool makeNullable = true) // No shadow entities in runtime
         => CreateEFPropertyExpression(target, property.DeclaringType.ClrType, property.ClrType, property.Name, makeNullable);
 
-    private static Expression CreateEFPropertyExpression(
+    /// <summary>
+    ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
+    ///     the same compatibility standards as public APIs. It may be changed or removed without notice in
+    ///     any release. You should only use it directly in your code with extreme caution and knowing that
+    ///     doing so can result in application failures when updating to a new Entity Framework Core release.
+    /// </summary>
+    [EntityFrameworkInternal]
+    public static Expression CreateEFPropertyExpression(
         Expression target,
         Type propertyDeclaringType,
         Type propertyType,
@@ -371,9 +392,50 @@ public static class ExpressionExtensions
             propertyType = propertyType.MakeNullable();
         }
 
+        // EF.Property expects an object as its first argument. If the target is a struct (complex type), we need an explicit up-cast to
+        // object.
+        if (target.Type.IsValueType)
+        {
+            target = Expression.Convert(target, typeof(object));
+        }
+
         return Expression.Call(
-            EF.PropertyMethod.MakeGenericMethod(propertyType),
+            EF.MakePropertyMethod(propertyType),
             target,
             Expression.Constant(propertyName));
+    }
+
+    private static readonly MethodInfo ObjectEqualsMethodInfo
+        = typeof(object).GetRuntimeMethod(nameof(object.Equals), [typeof(object), typeof(object)])!;
+
+    /// <summary>
+    ///     <para>
+    ///         Creates an <see cref="Expression" /> tree representing equality comparison between 2 expressions using
+    ///         <see cref="object.Equals(object?, object?)" /> method.
+    ///     </para>
+    ///     <para>
+    ///         This method is typically used by database providers (and other extensions). It is generally
+    ///         not used in application code.
+    ///     </para>
+    /// </summary>
+    /// <param name="left">The left expression in equality comparison.</param>
+    /// <param name="right">The right expression in equality comparison.</param>
+    /// <param name="negated">If the comparison is non-equality.</param>
+    /// <returns>An expression to compare left and right expressions.</returns>
+    public static Expression CreateEqualsExpression(
+        Expression left,
+        Expression right,
+        bool negated = false)
+    {
+        var result = Expression.Call(ObjectEqualsMethodInfo, AddConvertToObject(left), AddConvertToObject(right));
+
+        return negated
+            ? Expression.Not(result)
+            : result;
+
+        static Expression AddConvertToObject(Expression expression)
+            => expression.Type.IsValueType
+                ? Expression.Convert(expression, typeof(object))
+                : expression;
     }
 }

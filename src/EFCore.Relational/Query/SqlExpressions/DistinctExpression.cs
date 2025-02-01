@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions;
@@ -14,6 +14,8 @@ namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 /// </summary>
 public class DistinctExpression : SqlExpression
 {
+    private static ConstructorInfo? _quotingConstructor;
+
     /// <summary>
     ///     Creates a new instance of the <see cref="DistinctExpression" /> class.
     /// </summary>
@@ -21,6 +23,8 @@ public class DistinctExpression : SqlExpression
     public DistinctExpression(SqlExpression operand)
         : base(operand.Type, operand.TypeMapping)
     {
+        Check.NotNull(operand, nameof(operand));
+
         Operand = operand;
     }
 
@@ -31,7 +35,11 @@ public class DistinctExpression : SqlExpression
 
     /// <inheritdoc />
     protected override Expression VisitChildren(ExpressionVisitor visitor)
-        => Update((SqlExpression)visitor.Visit(Operand));
+    {
+        Check.NotNull(visitor, nameof(visitor));
+
+        return Update((SqlExpression)visitor.Visit(Operand));
+    }
 
     /// <summary>
     ///     Creates a new expression that is like this one, but using the supplied children. If all of the children are the same, it will
@@ -40,13 +48,25 @@ public class DistinctExpression : SqlExpression
     /// <param name="operand">The <see cref="Operand" /> property of the result.</param>
     /// <returns>This expression if no children changed, or an expression with the updated children.</returns>
     public virtual DistinctExpression Update(SqlExpression operand)
-        => operand != Operand
+    {
+        Check.NotNull(operand, nameof(operand));
+
+        return operand != Operand
             ? new DistinctExpression(operand)
             : this;
+    }
+
+    /// <inheritdoc />
+    public override Expression Quote()
+        => New(
+            _quotingConstructor ??= typeof(DistinctExpression).GetConstructor([typeof(SqlExpression)])!,
+            Operand.Quote());
 
     /// <inheritdoc />
     protected override void Print(ExpressionPrinter expressionPrinter)
     {
+        Check.NotNull(expressionPrinter, nameof(expressionPrinter));
+
         expressionPrinter.Append("(DISTINCT ");
         expressionPrinter.Visit(Operand);
         expressionPrinter.Append(")");

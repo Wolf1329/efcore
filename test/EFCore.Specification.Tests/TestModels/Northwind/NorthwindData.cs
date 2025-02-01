@@ -3,8 +3,12 @@
 
 namespace Microsoft.EntityFrameworkCore.TestModels.Northwind;
 
+#nullable disable
+
 public partial class NorthwindData : ISetSource
 {
+    public static readonly NorthwindData Instance = new();
+
     public Customer[] Customers { get; }
     public CustomerQuery[] CustomerQueries { get; }
     public CustomerQueryWithQueryFilter[] CustomerQueriesWithQueryFilter { get; }
@@ -16,7 +20,7 @@ public partial class NorthwindData : ISetSource
     public OrderQuery[] OrderQueries { get; }
     public OrderDetail[] OrderDetails { get; }
 
-    private readonly Dictionary<int, string> _categoryNameMap = new Dictionary<int, string>
+    private readonly Dictionary<int, string> _categoryNameMap = new()
     {
         { 1, "Beverages" },
         { 2, "Condiments" },
@@ -40,7 +44,7 @@ public partial class NorthwindData : ISetSource
 
         foreach (var customer in Customers)
         {
-            customer.Orders = new List<Order>();
+            customer.Orders = [];
 
             customerQueries.Add(
                 new CustomerQuery
@@ -60,7 +64,7 @@ public partial class NorthwindData : ISetSource
 
         foreach (var product in Products)
         {
-            product.OrderDetails = new List<OrderDetail>();
+            product.OrderDetails = [];
 
             if (!product.Discontinued)
             {
@@ -72,12 +76,13 @@ public partial class NorthwindData : ISetSource
                         ProductName = product.ProductName
                     });
 
-                productViews.Add(new ProductView
-                {
-                    CategoryName = _categoryNameMap[product.CategoryID.Value],
-                    ProductID = product.ProductID,
-                    ProductName = product.ProductName
-                });
+                productViews.Add(
+                    new ProductView
+                    {
+                        CategoryName = _categoryNameMap[product.CategoryID.Value],
+                        ProductID = product.ProductID,
+                        ProductName = product.ProductName
+                    });
             }
         }
 
@@ -206,13 +211,6 @@ public partial class NorthwindData : ISetSource
         }
 
         throw new InvalidOperationException("Invalid entity type: " + typeof(TEntity));
-    }
-
-    public static void Seed(NorthwindContext context)
-    {
-        AddEntities(context);
-
-        context.SaveChanges();
     }
 
     public static Task SeedAsync(NorthwindContext context)
